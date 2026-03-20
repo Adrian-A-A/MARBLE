@@ -1,0 +1,70 @@
+global:
+  main_script: marble/main.py
+  output_root: logs/pipeline_vllm
+  temp_config_root: logs/pipeline_tmp_vllm
+  model_keys:
+    - llm
+    - model
+    - model_name
+    - evaluate_llm
+  orchestration_key: coordinate_mode
+  orchestration_modes:
+    - star
+    - graph
+    - chain
+    - tree
+  env:
+    # vLLM OpenAI-compatible server endpoint.
+    OPENAI_API_BASE: http://127.0.0.1:8000/v1
+    # Common placeholder value for local OpenAI-compatible servers.
+    OPENAI_API_KEY: EMPTY
+
+model_sets:
+  tiny:
+    description: "Tiny local models for smoke tests"
+    models:
+      - openai/Qwen/Qwen2.5-0.5B-Instruct
+      - openai/Qwen/Qwen3-0.6B
+
+  small:
+    description: "Small local models for faster iterations"
+    models:
+      - openai/Qwen/Qwen2.5-1.5B-Instruct
+      - openai/meta-llama/Llama-3.2-1B-Instruct
+
+  medium:
+    description: "Medium local models for stronger quality"
+    models:
+      - openai/Qwen/Qwen2.5-7B-Instruct
+      - openai/meta-llama/Llama-3.1-8B-Instruct
+
+scenarios:
+  research:
+    configs:
+      - marble/configs/test_config_research/*.yaml
+    max_configs: 1
+
+  minecraft:
+    configs:
+      - marble/configs/test_config_minecraft/*.yaml
+    max_configs: 1
+
+  database:
+    configs:
+      - marble/configs/test_config_database/*.yaml
+    max_configs: 1
+
+  coding:
+    configs:
+      - marble/configs/coding_configs/*.yaml
+    max_configs: 1
+
+  bargaining:
+    configs:
+      - marble/configs/test_config_world/test_config_world.yaml
+    max_configs: 1
+
+  werewolf:
+    configs:
+      - marble/configs/test_config/werewolf_config/werewolf_config.yaml
+    max_configs: 1

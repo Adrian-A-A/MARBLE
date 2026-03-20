@@ -1,0 +1,23 @@
+{
+  "timestamp": "20260320_173703",
+  "manifest": "scripts/pipeline/ollama_pipeline.yaml",
+  "python_bin": "C:\\Users\\Adria\\Master Thesis tests\\MARBLE\\.venv\\Scripts\\python.exe",
+  "orchestration_scope": "default",
+  "dry_run": false,
+  "output_root": "logs/pipeline/20260320_173703",
+  "temp_root": "logs/pipeline_tmp/20260320_173703",
+  "tasks": [
+    {
+      "scenario": "werewolf",
+      "model": "openai/FunctionGemma",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_config/werewolf_config/werewolf_config.yaml",
+      "temp_config": "logs/pipeline_tmp/20260320_173703/werewolf/openai_FunctionGemma/marble_configs_test_config_werewolf_config_werewolf_config.yaml",
+      "output_dir": "logs/pipeline/20260320_173703/werewolf/openai_FunctionGemma/marble_configs_test_config_werewolf_config_werewolf_config",
+      "run_log": "logs/pipeline/20260320_173703/werewolf/openai_FunctionGemma/marble_configs_test_config_werewolf_config_werewolf_config/run.log",
+      "status": "failed",
+      "exit_code": 1,
+      "expected_output_file": null
+    }
+  ]
+}

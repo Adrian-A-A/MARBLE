@@ -1,6 +1,6 @@
-# Ollama Scenario Pipeline
+# Ollama and vLLM Scenario Pipelines
 
-This pipeline runs MARBLE scenarios against one or more Ollama models from a single command.
+These pipelines run MARBLE scenarios against one or more local models from a single command, using either Ollama or vLLM.
 
 ## What it does
 
@@ -13,6 +13,66 @@ This pipeline runs MARBLE scenarios against one or more Ollama models from a sin
 ## Quick start
 
 From repo root:
+
+### vLLM pipeline (new)
+
+Start vLLM server on a GPU node (example):
+```bash
+vllm serve Qwen/Qwen2.5-7B-Instruct --host 0.0.0.0 --port 8000
+```
+
+Start vLLM server on a CPU node (example):
+```bash
+vllm serve Qwen/Qwen2.5-0.5B-Instruct --device cpu --host 0.0.0.0 --port 8000
+```
+
+Dry-run to preview tasks:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --dry-run
+```
+
+Run all scenarios with a model set:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --model-set tiny
+python scripts/pipeline/run_vllm_pipeline.py --model-set small
+python scripts/pipeline/run_vllm_pipeline.py --model-set medium
+```
+
+If vLLM is running on another host, override endpoint:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --model-set tiny --api-base http://<node-ip>:8000/v1
+```
+
+Evaluate the latest completed vLLM pipeline run:
+```bash
+python scripts/pipeline/run_vllm_evaluation_pipeline.py
+```
+
+Load large Hugging Face models one-by-one with automatic unload/VRAM cleanup:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py \
+  --manage-vllm-server \
+  --model-set medium \
+  --vllm-device cuda \
+  --vllm-extra-args "--gpu-memory-utilization 0.92 --max-model-len 8192"
+```
+
+CPU-only node with managed vLLM server:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --model-set tiny --vllm-device cpu
+```
+
+Gated/private Hugging Face model access:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --models openai/meta-llama/Llama-3.1-8B-Instruct --hf-token <your_hf_token>
+```
+
+Notes for managed mode:
+- Models in `scripts/pipeline/vllm_pipeline.yaml` can stay in LiteLLM-style form (`openai/<hf_repo_id>`).
+- The runner strips `openai/` when launching `vllm serve` so Hugging Face repo IDs load correctly.
+- After each model finishes, the runner terminates vLLM and performs best-effort VRAM cache cleanup.
+
+### Ollama pipeline
 
 **Dry-run to preview tasks:**
 ```bash
@@ -127,9 +187,19 @@ Compare specific runs only:
 python scripts/pipeline/export_evaluation_comparison_csv.py --runs 20260320_120737,20260320_142148
 ```
 
+For vLLM pipeline runs, use:
+
+```bash
+python scripts/pipeline/export_vllm_evaluation_comparison_csv.py
+```
+
+This writes CSV files under `logs/pipeline_vllm/comparison/`.
+
 ## Manifest structure
 
 Edit `scripts/pipeline/ollama_pipeline.yaml`:
+
+For vLLM runs, edit `scripts/pipeline/vllm_pipeline.yaml`.
 
 ### Global section
 - `global.main_script`: Entry point, default `marble/main.py`.

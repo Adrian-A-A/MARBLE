@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-03-20T17:38:07",
+  "run_root": "C:\\Users\\Adria\\Master Thesis tests\\MARBLE\\logs\\pipeline\\20260320_173703",
+  "manifest": "C:\\Users\\Adria\\Master Thesis tests\\MARBLE\\logs\\pipeline\\20260320_173703\\tasks_manifest.json",
+  "aggregate": {
+    "total_tasks": 1,
+    "passed": 0,
+    "failed": 1,
+    "skipped": 0,
+    "output_found": 0,
+    "tasks_with_existing_evaluations": 0,
+    "tasks_by_scenario": {
+      "werewolf": 1
+    }
+  },
+  "existing_script_evaluations": {
+    "database_batch_eval": {
+      "status": "not_applicable",
+      "reason": "No database tasks in run."
+    }
+  },
+  "tasks": [
+    {
+      "scenario": "werewolf",
+      "model": "openai/FunctionGemma",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_config/werewolf_config/werewolf_config.yaml",
+      "status": "failed",
+      "exit_code": 1,
+      "run_log_exists": true,
+      "output_exists": false,
+      "output_file": null,
+      "existing_evaluations": {}
+    }
+  ]
+}
