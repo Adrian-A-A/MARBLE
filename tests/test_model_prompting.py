@@ -9,7 +9,7 @@ class TestModelPrompting(unittest.TestCase):
     def test_model_prompting(self) -> None:
         prompt = "This is a test sentence."
         message = model_prompting(
-            llm_model="gpt-3.5-turbo",
+            llm_model="openai/qwen2.5:0.5b",
             messages=[{"role": "system", "content": prompt}],
             return_num=1,
             max_token_num=512,

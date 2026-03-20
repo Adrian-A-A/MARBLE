@@ -2,7 +2,7 @@ WORKSPACE_DIR="marble/workspace"
 UPDATE_SCRIPT="scripts/coding/utils/update_coding_config.py"
 RUN_DEMO_SCRIPT="marble/run_demo.sh"
 
-model_name="gpt-3.5-turbo"
+model_name="openai/qwen2.5:0.5b"
 safe_model_name=$(echo ${model_name} | tr '/' '_')
 LOG_DIR="marble/logs/${safe_model_name}"
 

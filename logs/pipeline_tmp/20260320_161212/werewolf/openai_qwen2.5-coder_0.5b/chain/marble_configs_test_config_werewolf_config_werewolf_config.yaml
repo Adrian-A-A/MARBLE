@@ -1,0 +1,32 @@
+environment:
+  type: werewolf
+rounds: 10
+name: thesis_test_run
+openai_api_key: ollama
+system_prompt_path: marble\\agent\\werewolf_prompts\\system_prompt.yaml
+roles:
+- wolf
+- wolf
+- wolf
+- villager
+- villager
+- villager
+- seer
+- witch
+- guard
+randomize_roles: true
+use_random_names: true
+eval_config:
+  base_url: http://localhost:11434/v1
+  api_key: ollama
+  model_name: openai/qwen2.5-coder:0.5b
+villager_config:
+  base_url: http://localhost:11434/v1
+  api_key: ollama
+  model_name: openai/qwen2.5-coder:0.5b
+werewolf_config:
+  base_url: http://localhost:11434/v1
+  api_key: ollama
+  model_name: openai/qwen2.5-coder:0.5b
+cooperation_mode: cooperative
+use_daily_tasks: true

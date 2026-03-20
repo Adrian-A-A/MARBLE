@@ -5,6 +5,7 @@ Evaluator module for tracking metrics and evaluating agent performance.
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 from ruamel.yaml import YAML
@@ -13,6 +14,14 @@ from marble.agent import BaseAgent
 from marble.environments import BaseEnvironment
 from marble.llms.model_prompting import model_prompting
 from marble.utils.logger import get_logger
+
+
+def fill_prompt_template(template: str, values: Dict[str, Any]) -> str:
+    """Replace only known placeholders to avoid KeyError from JSON braces."""
+    prompt = template
+    for key, value in values.items():
+        prompt = prompt.replace("{" + key + "}", str(value))
+    return prompt
 
 
 class Evaluator:
@@ -38,7 +47,8 @@ class Evaluator:
             "agent_kpis": {},
             "code_quality": {}
         }
-        with open('evaluator/evaluator_prompts.json', 'r', encoding='utf-8') as f:
+        prompts_path = Path(__file__).resolve().parent / "evaluator_prompts.json"
+        with prompts_path.open('r', encoding='utf-8') as f:
             self.evaluation_prompts = json.load(f)
 
         evaluate_llm_config = self.metrics_config.get('evaluate_llm', {})
@@ -75,7 +85,10 @@ class Evaluator:
         # Get the communication prompt
         communication_prompt_template = self.evaluation_prompts["Graph"]["Communication"]["prompt"]
         # Fill in the placeholders {task} and {communications}
-        prompt = communication_prompt_template.format(task=task, communications=communications)
+        prompt = fill_prompt_template(
+            communication_prompt_template,
+            {"task": task, "communications": communications},
+        )
         # Call the language model
         result = model_prompting(
             llm_model=self.llm,
@@ -105,11 +118,14 @@ class Evaluator:
         # Get the planning prompt
         planning_prompt_template = self.evaluation_prompts["Graph"]["Planning"]["prompt"]
         # Fill in the placeholders
-        prompt = planning_prompt_template.format(
-            summary=summary,
-            agent_profiles=agent_profiles,
-            agent_tasks=agent_tasks,
-            results=results
+        prompt = fill_prompt_template(
+            planning_prompt_template,
+            {
+                "summary": summary,
+                "agent_profiles": agent_profiles,
+                "agent_tasks": agent_tasks,
+                "results": results,
+            },
         )
         # Call the language model
         result = model_prompting(
@@ -142,7 +158,10 @@ class Evaluator:
             agent_results = agent_results[:MAX_LENGTH] + "..."
         kpi_prompt_template = self.evaluation_prompts["Graph"]["KPI"]["prompt"]
         # Fill in the placeholders {task} and {agent_results}
-        prompt = kpi_prompt_template.format(task=task, agent_results=agent_results)
+        prompt = fill_prompt_template(
+            kpi_prompt_template,
+            {"task": task, "agent_results": agent_results},
+        )
         # Call the language model
         result = model_prompting(
             llm_model=self.llm,
@@ -178,7 +197,10 @@ class Evaluator:
         # Get the research evaluation prompt
         research_prompt_template = self.evaluation_prompts["research"]["task_evaluation"]["prompt"]
         # Fill in the placeholders {task} and {result}
-        prompt = research_prompt_template.format(task=task, result=result)
+        prompt = fill_prompt_template(
+            research_prompt_template,
+            {"task": task, "result": result},
+        )
         # Call the language model
         llm_response = model_prompting(
             llm_model=self.llm,
@@ -209,7 +231,10 @@ class Evaluator:
         # change the prompt to evaluate buyer and seller
         # world_prompt_template = self.evaluation_prompts["world"]["task_evaluation"]["buyer_prompt"]
         world_prompt_template = self.evaluation_prompts["world"]["task_evaluation"]["seller_prompt"]
-        prompt = world_prompt_template.format(task=task, result=result)
+        prompt = fill_prompt_template(
+            world_prompt_template,
+            {"task": task, "result": result},
+        )
 
         llm_response = model_prompting(
             llm_model=self.llm,
@@ -321,11 +346,13 @@ class Evaluator:
                 # Ensure ratings are integers
                 ratings_dict: Dict[str, int] = {k: int(v) for k, v in ratings.items()}
                 return ratings_dict
-            except json.JSONDecodeError:
-                self.logger.error("Failed to parse JSON from assistant's answer.")
+        
+            else:
+                self.logger.error("No JSON found in assistant's answer.")
                 return {}
-        else:
-            self.logger.error("No JSON found in assistant's answer.")
+            
+        except json.JSONDecodeError:
+            self.logger.error("Failed to parse JSON from assistant's answer.")
             return {}
 
     def parse_score(self, assistant_answer: str) -> int:

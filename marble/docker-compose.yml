@@ -3,9 +3,9 @@ x-vllm-server-base: &vllm-server-base
   ipc: host
   command:
     - --disable-log-requests   # To save your eyes from the logs
-    - --model=meta-llama/Llama-3.3-70B-Instruct
+    - --model=openai/qwen2.5:0.5b
     - --tensor-parallel-size=4
-    - --tool-call-parser=llama3_json
+    - --tool-call-parser=openai_json
     - --enable-auto-tool-choice
   volumes:
     - /opt/dlami/nvme/zhe/.cache/huggingface:/root/.cache/huggingface:rw

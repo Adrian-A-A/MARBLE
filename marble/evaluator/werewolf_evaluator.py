@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import openai
@@ -288,8 +289,16 @@ class WerewolfEvaluator:
         # 2) Load the YAML with the seven dimensions prompts/tools
         #    You need to prepare 'villager_combined_evaluation.yaml' (or other file names)
         #    containing "system", "user", "tools", and function: "villager_combined_evaluation"
-        combined_yaml_file = "prompts/villager_combined_evaluation.yaml"
-        if not os.path.exists(combined_yaml_file):
+        combined_yaml_file = (
+            Path(__file__).resolve().parent
+            / "prompts"
+            / "villager_combined_evaluation.yaml"
+        )
+        if not combined_yaml_file.exists():
+            # Backward-compatible fallback for older layouts.
+            combined_yaml_file = Path("prompts") / "villager_combined_evaluation.yaml"
+
+        if not combined_yaml_file.exists():
             print(
                 f"[evaluate_villager_merged_performance] YAML not found: {combined_yaml_file}"
             )

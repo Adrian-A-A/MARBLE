@@ -1,9 +1,9 @@
-llm: "gpt-3.5-turbo"
+llm: "qwen2.5:0.5b"
 
 metrics:
   evaluate_llm:
     provider: "openai"
-    model: "gpt-3.5-turbo"
+    model: "qwen2.5:0.5b"
   engagement_level: true
   relevance: true
   diversity_of_perspectives: true

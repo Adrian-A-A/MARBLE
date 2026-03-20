@@ -76,9 +76,9 @@ for folder in folder_list:
         # Call the LLM for completion
         try:
             completion = litellm.completion(
-                model="gpt-4o-mini",
+                model="openai/qwen2.5:0.5b",
                 messages=trim_messages(
-                    messages, model="gpt-4o-mini", max_tokens=int(16384 * 0.6)
+                    messages, model="openai/qwen2.5:0.5b", max_tokens=int(16384 * 0.6)
                 ),
                 max_tokens=512,
                 temperature=0.0,

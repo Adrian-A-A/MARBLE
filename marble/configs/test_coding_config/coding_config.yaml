@@ -12,7 +12,7 @@ relationships:
   - [agent3, agent2, "collaborates with"]
   # - [agent3, agent4, "collaborates with"]
 
-llm: "gpt-4o-mini"
+llm: "openai/qwen2.5:0.5b"
 
 environment:
   type: Coding
@@ -94,7 +94,7 @@ memory:
   type: SharedMemory
 
 metrics:
-  evaluate_llm: "gpt-4o"
+  evaluate_llm: "openai/qwen2.5:0.5b"
   code_quality: true
   test_coverage: true
   collaboration_effectiveness: true

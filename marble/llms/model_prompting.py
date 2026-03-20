@@ -28,18 +28,35 @@ def model_prompting(
         base_url = "https://api.ohmygpt.com/v1"
     else:
         base_url = None
-    completion = litellm.completion(
-        model=llm_model,
-        messages=messages,
-        max_tokens=max_token_num,
-        n=return_num,
-        top_p=top_p,
-        temperature=temperature,
-        stream=stream,
-        tools=tools,
-        tool_choice=tool_choice,
-        base_url=base_url,
-    )
+    try:
+        completion = litellm.completion(
+            model=llm_model,
+            messages=messages,
+            max_tokens=max_token_num,
+            n=return_num,
+            top_p=top_p,
+            temperature=temperature,
+            stream=stream,
+            tools=tools,
+            tool_choice=tool_choice,
+            base_url=base_url,
+        )
+    except Exception as exc:
+        # Some local Ollama models (e.g. phi3:3.8b) reject tool-calling requests.
+        # Fall back to plain chat completion when tools are unsupported.
+        if tools and "does not support tools" in str(exc).lower():
+            completion = litellm.completion(
+                model=llm_model,
+                messages=messages,
+                max_tokens=max_token_num,
+                n=return_num,
+                top_p=top_p,
+                temperature=temperature,
+                stream=stream,
+                base_url=base_url,
+            )
+        else:
+            raise
     message_0: Message = completion.choices[0].message
     assert message_0 is not None
     assert isinstance(message_0, Message)

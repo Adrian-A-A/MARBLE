@@ -1,0 +1,88 @@
+system: |
+  You are an impartial evaluator for a Werewolf game.
+  Assess only the Villager side performance using the provided game log.
+  Return exactly one tool call with concise, evidence-based scoring.
+
+user: |
+  Evaluate villager performance from the game log below.
+
+  Scoring dimensions (1-5):
+  1) info_effectiveness_score: Did villagers share useful, actionable information?
+  2) collaboration_limiting_score: Did villagers avoid harmful confusion and coordinate effectively?
+  3) logic_and_reasoning_score: Were arguments coherent and evidence-based?
+  4) leadership_and_sheriff_score: Was leadership and sheriff behavior effective?
+  5) voting_eliminations_score: Were votes/eliminations strategically sound?
+  6) protect_key_players_score: Did villagers protect critical roles/players when possible?
+  7) result_orientation_score: Did villagers act toward win conditions and adapt over time?
+
+  For each dimension, provide a short textual justification.
+  Then provide all numeric scores and textual fields in the tool arguments.
+
+  Game log:
+  <<game_log>>
+
+tools:
+  - type: function
+    function:
+      name: villager_combined_evaluation
+      description: Evaluate villager performance over seven dimensions and provide weighted-score inputs.
+      parameters:
+        type: object
+        properties:
+          info_effectiveness_score:
+            type: number
+            minimum: 1
+            maximum: 5
+          collaboration_limiting_score:
+            type: number
+            minimum: 1
+            maximum: 5
+          logic_and_reasoning_score:
+            type: number
+            minimum: 1
+            maximum: 5
+          leadership_and_sheriff_score:
+            type: number
+            minimum: 1
+            maximum: 5
+          voting_eliminations_score:
+            type: number
+            minimum: 1
+            maximum: 5
+          protect_key_players_score:
+            type: number
+            minimum: 1
+            maximum: 5
+          result_orientation_score:
+            type: number
+            minimum: 1
+            maximum: 5
+          info_effectiveness:
+            type: string
+          collaboration_limiting:
+            type: string
+          logic_and_reasoning:
+            type: string
+          leadership_and_sheriff:
+            type: string
+          voting_eliminations:
+            type: string
+          protect_key_players:
+            type: string
+          result_orientation:
+            type: string
+        required:
+          - info_effectiveness_score
+          - collaboration_limiting_score
+          - logic_and_reasoning_score
+          - leadership_and_sheriff_score
+          - voting_eliminations_score
+          - protect_key_players_score
+          - result_orientation_score
+          - info_effectiveness
+          - collaboration_limiting
+          - logic_and_reasoning
+          - leadership_and_sheriff
+          - voting_eliminations
+          - protect_key_players
+          - result_orientation

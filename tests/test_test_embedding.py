@@ -7,7 +7,7 @@ class TestTextEmbedding(unittest.TestCase):
     def test_text_embedding(self) -> None:
         content = "This is a test sentence."
         emebedding = text_embedding(
-            model="text-embedding-3-small",
+            model="openai/qwen3-embedding:0.6b",
             input=content,
         )
         self.assertIsInstance(emebedding, list)

@@ -714,6 +714,7 @@ class Engine:
                         f"Agent '{next_agent_id}' not found in the graph. keep the same agent."
                     )
                     current_agent = current_agent_
+                # TODO: Revisit strict handling when plan is None/invalid (e.g., fail-fast or degrade run status).
                 task = plan
                 chain_length += 1
                 self.planner.update_progress(result)

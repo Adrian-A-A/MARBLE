@@ -43,7 +43,7 @@ def generate_task_milestones(task_description, client):
         rounds += 1
         try:
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model="openai/qwen2.5:0.5b",
                 messages=messages,
                 tools=[tool],
                 tool_choice="required",

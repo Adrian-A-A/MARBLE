@@ -9,7 +9,7 @@ CONFIG_PATHS=(
     "${BASE_CONFIG_DIR}/cot_config/coding_config.yaml"
 )
 
-model_name="gpt-3.5-turbo"
+model_name="openai/qwen2.5:0.5b"
 safe_model_name=$(echo ${model_name} | tr '/' '_')
 BASE_LOG_DIR="marble/logs/${safe_model_name}"
 

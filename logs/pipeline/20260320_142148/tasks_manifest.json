@@ -1,0 +1,71 @@
+{
+  "timestamp": "20260320_142148",
+  "manifest": "scripts/pipeline/ollama_pipeline.yaml",
+  "python_bin": "C:\\Users\\Adria\\Master Thesis tests\\.venv\\Scripts\\python.exe",
+  "orchestration_scope": "default",
+  "dry_run": true,
+  "output_root": "logs/pipeline/20260320_142148",
+  "temp_root": "logs/pipeline_tmp/20260320_142148",
+  "tasks": [
+    {
+      "scenario": "reasoning",
+      "model": "openai/nemotron-3-nano:4b",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_config_reasoning.yaml",
+      "temp_config": "logs/pipeline_tmp/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning.yaml",
+      "output_dir": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning",
+      "run_log": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning/run.log",
+      "status": "ok",
+      "exit_code": 0,
+      "expected_output_file": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning/discussion_output.jsonl"
+    },
+    {
+      "scenario": "reasoning",
+      "model": "openai/nemotron-3-nano:4b",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_config_reasoning_cot.yaml",
+      "temp_config": "logs/pipeline_tmp/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_cot.yaml",
+      "output_dir": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_cot",
+      "run_log": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_cot/run.log",
+      "status": "ok",
+      "exit_code": 0,
+      "expected_output_file": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_cot/discussion_output_cot.jsonl"
+    },
+    {
+      "scenario": "reasoning",
+      "model": "openai/nemotron-3-nano:4b",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_config_reasoning_default.yaml",
+      "temp_config": "logs/pipeline_tmp/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_default.yaml",
+      "output_dir": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_default",
+      "run_log": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_default/run.log",
+      "status": "ok",
+      "exit_code": 0,
+      "expected_output_file": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_default/discussion_output_default.jsonl"
+    },
+    {
+      "scenario": "reasoning",
+      "model": "openai/nemotron-3-nano:4b",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_config_reasoning_react.yaml",
+      "temp_config": "logs/pipeline_tmp/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_react.yaml",
+      "output_dir": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_react",
+      "run_log": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_react/run.log",
+      "status": "ok",
+      "exit_code": 0,
+      "expected_output_file": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_react/discussion_output_react.jsonl"
+    },
+    {
+      "scenario": "reasoning",
+      "model": "openai/nemotron-3-nano:4b",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_config_reasoning_reflexion.yaml",
+      "temp_config": "logs/pipeline_tmp/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_reflexion.yaml",
+      "output_dir": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_reflexion",
+      "run_log": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_reflexion/run.log",
+      "status": "ok",
+      "exit_code": 0,
+      "expected_output_file": "logs/pipeline/20260320_142148/reasoning/openai_nemotron-3-nano_4b/marble_configs_test_config_reasoning_reflexion/discussion_output_reflexion.jsonl"
+    }
+  ]
+}

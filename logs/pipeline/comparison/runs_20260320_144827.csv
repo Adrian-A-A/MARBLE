@@ -1,0 +1,2 @@
+run_id,evaluation_summary,generated_at,total_tasks,passed,failed,skipped,output_found,tasks_with_existing_evaluations,tasks_by_scenario,db_batch_eval_status
+20260320_142148,C:/Users/Adria/Master Thesis tests/MARBLE/logs/pipeline/20260320_142148/evaluation_summary.json,2026-03-20T14:28:43,5,5,0,0,0,0,"{""reasoning"": 5}",skipped

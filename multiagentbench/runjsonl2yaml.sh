@@ -6,9 +6,9 @@ INPUT_FILE="./research/research_main.jsonl"
 OUTPUT_FOLDER="output_yaml_files_main"
 DEFAULT_COORDINATE_MODE="graph"
 DEFAULT_ENVIRONMENT='{"max_iterations": 5, "name": "Research Collaboration Environment", "type": "Research"}'
-DEFAULT_LLM="gpt-3.5-turbo"
+DEFAULT_LLM="openai/qwen2.5:0.5b"
 DEFAULT_MEMORY='{"type": "BaseMemory"}'
-DEFAULT_METRICS_EVALUATE_LLM="gpt-4o"
+DEFAULT_METRICS_EVALUATE_LLM="openai/qwen2.5:0.5b"
 DEFAULT_OUTPUT='{"file_path": "result/discussion_output.jsonl"}'
 
 # Run the jsonl_to_yaml.py script with the parameters

@@ -2,7 +2,7 @@ import os
 
 from litellm import completion
 
-os.environ["TOGETHERAI_API_KEY"] = "YOUR_API_KEY"
+os.environ["OLLAMA_API_KEY"] = "af2c304065324d549ad3a0512c4605cb.XeY63kqybrSMWAGWArx4INoZ"
 
 
 def generate_text(prompt):
@@ -10,7 +10,7 @@ def generate_text(prompt):
         messages = [{"role": "user", "content": prompt}]
 
         response = completion(
-            model="together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            model="openai/qwen2.5:0.5b",
             messages=messages,
         )
 

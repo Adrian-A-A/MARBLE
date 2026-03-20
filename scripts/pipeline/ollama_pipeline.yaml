@@ -1,0 +1,75 @@
+global:
+  main_script: marble/main.py
+  output_root: logs/pipeline
+  temp_config_root: logs/pipeline_tmp
+  model_keys:
+    - llm
+    - model
+    - model_name
+    - evaluate_llm
+  orchestration_key: coordinate_mode
+  orchestration_modes:
+    - star
+    - graph
+    - chain
+    - tree
+  env:
+    OPENAI_API_KEY: ollama
+    OPENAI_API_BASE: http://localhost:11434/v1
+
+model_sets:
+  tiny:
+    description: "Tiny local models (< 2B params)"
+    models:
+      - openai/FunctionGemma
+      - openai/gemma3:270m
+      - openai/qwen2.5-coder:0.5b
+      - openai/qwen3:0.6b
+      
+  small:
+    description: "Small local models (2-8B params)"
+    models:
+      - openai/llama3.2:1b
+      - openai/deepseek-r1:1.5b
+      - openai/qwen3:1.7b
+
+  medium:
+    description: "Medium local models (8-70B params)"
+    models:
+      - openai/gemma:2b
+      - openai/phi3:3.8b
+      - openai/nemotron-3-nano:4b
+
+scenarios:
+  research:
+    configs:
+      - marble/configs/test_config_research/*.yaml
+    max_configs: 1 # There are 3 configs in test_config_research.
+
+  minecraft:
+    configs:
+      - marble/configs/test_config_minecraft/*.yaml
+    max_configs: 1 # There are 100 tasks in total in test_config_minecraft (although config has 500 because author ran 100x5 models).
+
+  database:
+    configs:
+      - marble/configs/test_config_database/*.yaml
+    max_configs: 1 # There are 100 tasks in total in test_config_database (although config has 500 because author ran 100x5 models).
+
+  coding:
+    configs:
+      - marble/configs/coding_configs/*.yaml
+    max_configs: 1 # There are 100 tasks in total in coding_configs
+
+  bargaining:
+    configs:
+      - marble/configs/test_config_world/test_config_world.yaml
+    max_configs: 1 # Only 1 config present in test_config_world
+    max_iterations: 3 # Set max iterations for bargaining scenario
+
+  werewolf:
+    configs:
+      - marble/configs/test_config/werewolf_config/werewolf_config.yaml
+    max_configs: 1
+    # Werewolf config uses model_name under villager_config/werewolf_config.
+    rounds: 1 # Can add more if needed

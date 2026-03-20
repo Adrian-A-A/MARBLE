@@ -3,7 +3,7 @@ coordinate_mode: chain
 relationships:
   - [agent1, agent2, "parent"]
 
-llm: "gpt-3.5-turbo"
+llm: "openai/qwen2.5:0.5b"
 
 environment:
   type: WorldSimulation
@@ -82,7 +82,7 @@ memory:
   type: SharedMemory
 
 metrics:
-  evaluate_llm: "gpt-3.5-turbo"
+  evaluate_llm: "openai/qwen2.5:0.5b"
   agreement_reached: true
 
 engine_planner:

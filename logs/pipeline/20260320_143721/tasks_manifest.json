@@ -1,0 +1,23 @@
+{
+  "timestamp": "20260320_143721",
+  "manifest": "scripts/pipeline/ollama_pipeline.yaml",
+  "python_bin": "C:\\Users\\Adria\\Master Thesis tests\\MARBLE\\.venv\\Scripts\\python.exe",
+  "orchestration_scope": "default",
+  "dry_run": false,
+  "output_root": "logs/pipeline/20260320_143721",
+  "temp_root": "logs/pipeline_tmp/20260320_143721",
+  "tasks": [
+    {
+      "scenario": "coding",
+      "model": "openai/qwen2.5-coder:0.5b",
+      "orchestration_mode": "default",
+      "source_config": "marble/configs/test_coding_config/coding_config.yaml",
+      "temp_config": "logs/pipeline_tmp/20260320_143721/coding/openai_qwen2.5-coder_0.5b/marble_configs_test_coding_config_coding_config.yaml",
+      "output_dir": "logs/pipeline/20260320_143721/coding/openai_qwen2.5-coder_0.5b/marble_configs_test_coding_config_coding_config",
+      "run_log": "logs/pipeline/20260320_143721/coding/openai_qwen2.5-coder_0.5b/marble_configs_test_coding_config_coding_config/run.log",
+      "status": "ok",
+      "exit_code": 0,
+      "expected_output_file": "logs/pipeline/20260320_143721/coding/openai_qwen2.5-coder_0.5b/marble_configs_test_coding_config_coding_config/development_output.jsonl"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ from litellm.types.utils import Message
 from marble.llms.model_prompting import model_prompting
 from marble.memory.base_memory import BaseMemory
 
+from collections import deque
 
 class ShortTermMemory(BaseMemory):
     """
@@ -20,7 +21,7 @@ class ShortTermMemory(BaseMemory):
         """
         super().__init__()
         self.memory_limit: int = memory_limit
-        self.storage: List[Dict[str, Union[str, Message]]] = []
+        self.storage: deque = deque()
 
     def update(self, key: str, information: Dict[str, Any]) -> None:
         """
@@ -32,18 +33,15 @@ class ShortTermMemory(BaseMemory):
         """
         if len(self.storage) >= self.memory_limit:
             if len(self.storage) >= 2:
-                oldest_event = self.storage.pop(0)
-                sec_oldest_event = self.storage.pop(0)
+                # deque handles popleft() more efficiently
+                oldest_event = self.storage.popleft() 
+                sec_oldest_event = self.storage.popleft()
                 summary = self.summarize([oldest_event, sec_oldest_event])
-                self.storage.insert(
-                    0, {"type": "old_memory_summary", "result": summary}
-                )
+                self.storage.appendleft({"type": "old_memory_summary", "result": summary})
             elif len(self.storage) == 1:
-                oldest_event = self.storage.pop(0)
+                oldest_event = self.storage.popleft()
                 summary = self.summarize([oldest_event])
-                self.storage.insert(
-                    0, {"type": "old_memory_summary", "result": summary}
-                )
+                self.storage.appendleft({"type": "old_memory_summary", "result": summary})
         self.storage.append(information)
 
     def summarize(self, memory: List[Dict[str, Union[str, Message]]]) -> Message:
@@ -64,7 +62,7 @@ class ShortTermMemory(BaseMemory):
             prompt += f"{idx}. {str(information)}\n"
 
         summary = model_prompting(
-            llm_model="gpt-3.5-turbo",
+            llm_model="openai/qwen2.5:0.5b",
             messages=[{"role": "system", "content": prompt}],
             return_num=1,
             max_token_num=512,
@@ -90,4 +88,4 @@ class ShortTermMemory(BaseMemory):
         Returns:
             List[Dict[str, Union[str, Message]]]: All stored information.
         """
-        return self.storage.copy()
+        return list(self.storage)

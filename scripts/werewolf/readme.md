@@ -25,11 +25,11 @@ use_daily_tasks: True  # Enable daily guidance for villagers
 
 ### API configurations
 villager_config:
-  base_model: "gpt-3.5-turbo"
+  base_model: "openai/qwen2.5:0.5b"
   api_key: "your_villager_api_key"
 
 werewolf_config:
-  base_model: "gpt-4"
+  base_model: "openai/qwen2.5:0.5b"
   api_key: "your_werewolf_api_key"
 Important Notes:
 

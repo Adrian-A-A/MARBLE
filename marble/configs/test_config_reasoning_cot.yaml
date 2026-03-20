@@ -31,14 +31,14 @@ environment:
   max_iterations: 1
   name: Discussion Simulation Environment
   type: Base
-llm: gpt-3.5-turbo
+llm: qwen2.5:0.5b
 memory:
   type: SharedMemory
 metrics:
   diversity_of_perspectives: true
   engagement_level: true
   evaluate_llm:
-    model: gpt-3.5-turbo
+    model: qwen2.5:0.5b
     provider: openai
   relevance: true
 output:

@@ -43,6 +43,9 @@ def json_parse(input_str: str) -> Dict[str, Any]:
     Raises:
         ValueError: If JSON parsing fails due to invalid format.
     """
+    if not input_str or not input_str.strip():
+        raise ValueError("JSON parsing failed. Empty response.")
+
     # Regular expression to match the content between ```json and ```
     pattern = r"```json\s*(\{.*?\})\s*```"
     match = re.search(pattern, input_str, re.DOTALL)
@@ -226,7 +229,7 @@ class EnginePlanner:
                     f"Received task assignment using group discussion: {assignment}"
                 )
                 return assignment
-            except json.JSONDecodeError as e:
+            except ValueError as e:
                 self.logger.error(
                     f"Failed to parse JSON response in group discussion: {e}"
                 )
@@ -305,7 +308,7 @@ class EnginePlanner:
                         assignment.get("evolving_experiences", ""),
                     )
                 return assignment
-            except json.JSONDecodeError as e:
+            except ValueError as e:
                 self.logger.error(
                     f"Failed to parse JSON response in cognitive evolve: {e}"
                 )
@@ -394,7 +397,7 @@ class EnginePlanner:
                     f"Received task assignment using naive planning: {assignment}"
                 )
                 return assignment
-            except json.JSONDecodeError as e:
+            except ValueError as e:
                 self.logger.error(f"Failed to parse JSON response in naive mode: {e}")
                 return {"tasks": {}, "continue": False}
 
@@ -492,6 +495,6 @@ class EnginePlanner:
             decision = json_parse(response[0].content)
             self.logger.debug(f"Received continuation decision: {decision}")
             return decision.get("continue", False)
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             self.logger.error(f"Failed to parse JSON decision response: {e}")
-            return False
+            return True

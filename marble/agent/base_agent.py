@@ -37,7 +37,7 @@ class BaseAgent:
         config: Dict[str, Union[Any, Dict[str, Any]]],
         env: EnvType,
         shared_memory: Union[SharedMemory, None] = None,
-        model: str = "gpt-3.5-turbo",
+        model: str = "openai/qwen2.5:0.5b",
     ):
         """
         Initialize the agent.
@@ -49,7 +49,7 @@ class BaseAgent:
         """
         agent_id = config.get("agent_id")
         if isinstance(model, dict):
-            self.llm = model.get("model", "gpt-3.5-turbo")
+            self.llm = model.get("model", "openai/qwen2.5:0.5b")
         else:
             self.llm = model
         assert isinstance(agent_id, str), "agent_id must be a string."

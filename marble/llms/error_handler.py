@@ -32,19 +32,20 @@ def api_calling_error_exponential_backoff(
                 modified_base_wait_time = base_wait_time
 
             attempts = 0
+            last_error: Optional[Exception] = None
             while attempts < modified_retries:
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
+                    last_error = e
                     wait_time = modified_base_wait_time * (2**attempts)
                     print(f"Attempt {attempts + 1} failed: {e}")
                     print(f"Waiting {wait_time} seconds before retrying...")
                     time.sleep(wait_time)
                     attempts += 1
-            print(
+            raise RuntimeError(
                 f"Failed to execute '{func.__name__}' after {modified_retries} retries."
-            )
-            return None
+            ) from last_error
 
         return cast(T, wrapper)
 

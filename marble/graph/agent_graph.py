@@ -294,6 +294,46 @@ class AgentGraph:
             }
         return profiles
 
+    def get_agent_profiles_linked(self, agent_id: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Get profiles for agents directly linked to the given agent.
+
+        A link is treated as any relationship where ``agent_id`` is either the
+        source or target. If no direct links exist, fall back to all other agents
+        so chain planning can still continue.
+
+        Args:
+            agent_id (str): The focal agent ID.
+
+        Returns:
+            Dict[str, Dict[str, Any]]: Mapping of linked agent IDs to profile payloads.
+        """
+        if agent_id not in self.agents:
+            raise ValueError(f"Agent '{agent_id}' does not exist.")
+
+        linked_ids: List[str] = []
+        for source, target, _ in self.relationships:
+            if source == agent_id and target != agent_id:
+                linked_ids.append(target)
+            elif target == agent_id and source != agent_id:
+                linked_ids.append(source)
+
+        # Preserve order while removing duplicates.
+        linked_ids = list(dict.fromkeys(linked_ids))
+
+        if not linked_ids:
+            linked_ids = [other_id for other_id in self.agents if other_id != agent_id]
+
+        profiles: Dict[str, Dict[str, Any]] = {}
+        for linked_id in linked_ids:
+            linked_agent = self.agents[linked_id]
+            profiles[linked_id] = {
+                "agent_id": linked_agent.agent_id,
+                "relationships": linked_agent.relationships,
+                "profile": linked_agent.get_profile(),
+            }
+        return profiles
+
     def get_roots(self) -> List[BaseAgent]:
         """
         Get the root agents (agents with no parents).

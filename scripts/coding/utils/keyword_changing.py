@@ -4,8 +4,8 @@ import fire
 
 
 def replace_model_name(
-    old_model="gpt-4o-mini",
-    new_model="gpt-3.5-turbo",
+    old_model="openai/qwen2.5:0.5b",
+    new_model="openai/qwen2.5:0.5b",
     file_paths=[
         "marble/engine/engine_planner.py",
         "marble/agent/coding_agent.py",

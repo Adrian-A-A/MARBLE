@@ -32,7 +32,7 @@ class LongTermMemory(BaseMemory):
             information (Dict[str, Union[str, Message]]): Information to store.
         """
         embedding = text_embedding(
-            model="text-embedding-3-small",
+            model="openai/qwen3-embedding:0.6b",
             input=str(information),
         )
         embedding_array: NDArray[Any] = np.array(embedding)
@@ -67,7 +67,7 @@ class LongTermMemory(BaseMemory):
         if not self.storage:
             return None
         embedding = text_embedding(
-            model="text-embedding-3-small",
+            model="openai/qwen3-embedding:0.6b",
             input=str(information),
         )
         embedding_array: NDArray[Any] = np.array(embedding)
@@ -109,7 +109,7 @@ class LongTermMemory(BaseMemory):
             prompt += f"{idx}. {str(information)}\n"
 
         summary = model_prompting(
-            llm_model="gpt-3.5-turbo",
+            llm_model="openai/qwen2.5:0.5b",
             messages=[{"role": "system", "content": prompt}],
             return_num=1,
             max_token_num=512,
