@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -115,8 +116,10 @@ class VLLMServerOptions:
     trust_remote_code: bool
     extra_args: str
     hf_token: str
+    hf_cache_dir: str
     api_key: str
     clear_vram_after_model: bool
+    clear_hf_cache_after_model: bool
 
 
 def build_tasks(
@@ -386,6 +389,35 @@ def clear_vram_best_effort() -> None:
         pass
 
 
+def resolve_hf_hub_cache_dir(explicit_cache_dir: str, env: Dict[str, str]) -> Path:
+    """Resolve Hugging Face hub cache root path from CLI/env/defaults."""
+    if explicit_cache_dir:
+        return Path(explicit_cache_dir).expanduser()
+    if env.get("HUGGINGFACE_HUB_CACHE"):
+        return Path(env["HUGGINGFACE_HUB_CACHE"]).expanduser()
+    if env.get("HF_HUB_CACHE"):
+        return Path(env["HF_HUB_CACHE"]).expanduser()
+    if env.get("HF_HOME"):
+        return Path(env["HF_HOME"]).expanduser() / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def cleanup_model_hf_cache(model_id: str, opts: VLLMServerOptions, env: Dict[str, str]) -> None:
+    """Delete one model repo from HF hub cache to bound disk usage."""
+    cache_root = resolve_hf_hub_cache_dir(opts.hf_cache_dir, env)
+    repo_dir = cache_root / f"models--{model_id.replace('/', '--')}"
+
+    if not repo_dir.exists():
+        print(f"[HF CACHE] no cache dir found for {model_id} under {cache_root}")
+        return
+
+    try:
+        shutil.rmtree(repo_dir)
+        print(f"[HF CACHE] removed {repo_dir}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[HF CACHE] failed to remove {repo_dir}: {exc}")
+
+
 def run_task(
     repo_root: Path,
     python_bin: str,
@@ -549,10 +581,27 @@ def parse_args() -> argparse.Namespace:
         help="Optional Hugging Face token used by managed vLLM server to download gated models.",
     )
     parser.add_argument(
+        "--hf-cache-dir",
+        default="",
+        help=(
+            "Optional Hugging Face hub cache directory. "
+            "Defaults to HUGGINGFACE_HUB_CACHE/HF_HOME or ~/.cache/huggingface/hub."
+        ),
+    )
+    parser.add_argument(
         "--clear-vram-after-model",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="When managing server, clear VRAM caches after each model unload (default: true).",
+    )
+    parser.add_argument(
+        "--clear-hf-cache-after-model",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "When managing server, delete the current model's HF cache directory after it finishes. "
+            "Use this when disk space is limited (default: false)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -624,8 +673,10 @@ def main() -> int:
         trust_remote_code=args.vllm_trust_remote_code,
         extra_args=args.vllm_extra_args,
         hf_token=args.hf_token,
+        hf_cache_dir=args.hf_cache_dir,
         api_key=server_api_key,
         clear_vram_after_model=args.clear_vram_after_model,
+        clear_hf_cache_after_model=args.clear_hf_cache_after_model,
     )
 
     main_script = str((repo_root / (global_cfg.get("main_script") or "marble/main.py")).resolve())
@@ -699,6 +750,10 @@ def main() -> int:
             if vllm_opts.hf_token:
                 server_env["HF_TOKEN"] = vllm_opts.hf_token
                 server_env["HUGGING_FACE_HUB_TOKEN"] = vllm_opts.hf_token
+            if vllm_opts.hf_cache_dir:
+                cache_dir = str(Path(vllm_opts.hf_cache_dir).expanduser())
+                server_env["HUGGINGFACE_HUB_CACHE"] = cache_dir
+                server_env["HF_HUB_CACHE"] = cache_dir
 
             serve_cmd = build_vllm_serve_command(hf_model_id, vllm_opts)
             print("\n[VLLM LOAD]")
@@ -768,6 +823,8 @@ def main() -> int:
                 if vllm_opts.clear_vram_after_model:
                     clear_vram_best_effort()
                     print("[VLLM UNLOAD] cleared model and ran best-effort VRAM cleanup")
+                if vllm_opts.clear_hf_cache_after_model:
+                    cleanup_model_hf_cache(hf_model_id, vllm_opts, server_env)
 
                 if args.fail_fast and failed:
                     break

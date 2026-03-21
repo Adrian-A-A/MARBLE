@@ -62,6 +62,16 @@ CPU-only node with managed vLLM server:
 python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --model-set tiny --vllm-device cpu
 ```
 
+Low-disk mode (delete each model cache after it finishes):
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --model-set medium --vllm-device cuda --clear-hf-cache-after-model
+```
+
+Optional custom Hugging Face cache location:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --model-set medium --vllm-device cuda --hf-cache-dir D:/hf_cache --clear-hf-cache-after-model
+```
+
 Gated/private Hugging Face model access:
 ```bash
 python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --models openai/meta-llama/Llama-3.1-8B-Instruct --hf-token <your_hf_token>
@@ -71,6 +81,7 @@ Notes for managed mode:
 - Models in `scripts/pipeline/vllm_pipeline.yaml` can stay in LiteLLM-style form (`openai/<hf_repo_id>`).
 - The runner strips `openai/` when launching `vllm serve` so Hugging Face repo IDs load correctly.
 - After each model finishes, the runner terminates vLLM and performs best-effort VRAM cache cleanup.
+- With `--clear-hf-cache-after-model`, the runner also deletes that model's local Hugging Face cache directory to free disk before the next model.
 
 ### Ollama pipeline
 
