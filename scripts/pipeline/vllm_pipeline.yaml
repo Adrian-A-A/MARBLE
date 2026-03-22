@@ -23,38 +23,38 @@ model_sets:
   tiny:
     description: "Tiny local models (0.8B-3B)"
     models:
+      - openai/Qwen/Qwen3.5-0.8B
       - openai/Qwen/Qwen3.5-2B
       - openai/Nanbeige/Nanbeige4.1-3B
       - openai/mistralai/Ministral-3-3B-Reasoning-2512
-      - openai/Qwen/Qwen3.5-0.8B
       - openai/RedHatAI/gemma-3-1b-it-quantized.w8a8
 
   small:
     description: "Small local models for faster iterations (4B-9B)"
     models:
-      - openai/Qwen/Qwen3.5-9B
       - openai/Qwen/Qwen3.5-4B
       - openai/tiiuae/Falcon-H1R-7B-FP8
-      - openai/nvidia/NVIDIA-Nemotron-Nano-9B-v2
       - openai/mistralai/Ministral-3-8B-Reasoning-2512
+      - openai/Qwen/Qwen3.5-9B
+      - openai/nvidia/NVIDIA-Nemotron-Nano-9B-v2
 
   medium:
     description: "Medium local models for stronger quality (20B-35B)"
     models:
-      - openai/Qwen/Qwen3.5-27B
-      - openai/Qwen/Qwen3.5-35B-A3B
       - openai/openai/gpt-oss-20b
-      - openai/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+      - openai/Qwen/Qwen3.5-27B
       - openai/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+      - openai/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+      - openai/Qwen/Qwen3.5-35B-A3B
 
   large:
     description: "Large local models for strongest quality "
     models:
-      - openai/openai/gpt-oss-120b
-      - openai/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
       - openai/RedHatAI/DeepSeek-R1-Distill-Llama-70B-FP8-dynamic
       - openai/RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
       - openai/Qwen/Qwen2.5-72B-Instruct-AWQ
+      - openai/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
+      - openai/openai/gpt-oss-120b
 
 scenarios:
   research:
