@@ -36,6 +36,7 @@ Run all scenarios with a model set:
 python scripts/pipeline/run_vllm_pipeline.py --model-set tiny
 python scripts/pipeline/run_vllm_pipeline.py --model-set small
 python scripts/pipeline/run_vllm_pipeline.py --model-set medium
+python scripts/pipeline/run_vllm_pipeline.py --model-set large
 ```
 
 If vLLM is running on another host, override endpoint:
@@ -56,6 +57,29 @@ python scripts/pipeline/run_vllm_pipeline.py \
   --vllm-device cuda \
   --vllm-extra-args "--gpu-memory-utilization 0.92 --max-model-len 8192"
 ```
+
+Automatic multi-GPU for large models (default: models inferred as >=40B use 2 GPUs):
+```bash
+python scripts/pipeline/run_vllm_pipeline.py \
+  --manage-vllm-server \
+  --model-set large \
+  --vllm-device cuda
+```
+
+Tune or disable large-model auto parallelism:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py \
+  --manage-vllm-server \
+  --model-set large \
+  --vllm-device cuda \
+  --large-model-threshold-b 60 \
+  --large-model-tensor-parallel-size 2 \
+  --large-model-gpu-ids 0,1
+```
+
+Notes:
+- If `--vllm-extra-args` already contains `--tensor-parallel-size`, that explicit value is respected.
+- Set `--large-model-gpu-ids ""` to keep existing `CUDA_VISIBLE_DEVICES` unchanged.
 
 CPU-only node with managed vLLM server:
 ```bash
