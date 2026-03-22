@@ -341,6 +341,50 @@ def wait_for_vllm_ready(api_base: str, api_key: str, timeout_sec: int) -> None:
     )
 
 
+def wait_for_vllm_chat_ready(
+    api_base: str,
+    api_key: str,
+    model: str,
+    timeout_sec: int,
+) -> None:
+    """Poll chat completions endpoint until the served model can answer a tiny request."""
+    deadline = time.time() + timeout_sec
+    url = api_base.rstrip("/") + "/chat/completions"
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+        "temperature": 0,
+    }
+
+    last_error: Optional[str] = None
+    while time.time() < deadline:
+        req = url_request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with url_request.urlopen(req, timeout=20) as resp:
+                if 200 <= resp.status < 300:
+                    return
+                last_error = f"HTTP {resp.status}"
+        except Exception as exc:  # noqa: BLE001
+            last_error = str(exc)
+        time.sleep(2)
+
+    raise TimeoutError(
+        f"Timed out waiting for vLLM chat readiness at {url}. "
+        f"Last error: {last_error or 'unknown'}"
+    )
+
+
 def build_vllm_serve_command(model: str, opts: VLLMServerOptions) -> List[str]:
     """Build `vllm serve` command for one model."""
     command = [
@@ -778,6 +822,12 @@ def main() -> int:
                     wait_for_vllm_ready(
                         api_base=managed_api_base,
                         api_key=vllm_opts.api_key,
+                        timeout_sec=vllm_opts.startup_timeout,
+                    )
+                    wait_for_vllm_chat_ready(
+                        api_base=managed_api_base,
+                        api_key=vllm_opts.api_key,
+                        model=hf_model_id,
                         timeout_sec=vllm_opts.startup_timeout,
                     )
                     server_ready = True
