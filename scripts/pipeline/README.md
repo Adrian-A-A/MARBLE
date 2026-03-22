@@ -16,6 +16,11 @@ From repo root:
 
 ### vLLM pipeline (new)
 
+No-brainer GPU run:
+```bash
+python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --model-set tiny
+```
+
 Start vLLM server on a GPU node (example):
 ```bash
 vllm serve Qwen/Qwen2.5-7B-Instruct --host 0.0.0.0 --port 8000
