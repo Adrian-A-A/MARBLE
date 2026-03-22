@@ -150,6 +150,10 @@ class MinecraftClient:
         debug=False,
     ):
         MinecraftClient.port = port
+        server_script = os.path.join(
+            os.path.dirname(__file__),
+            "minecraft_server.py",
+        )
         if verbose:
             print("launch ...")
         for key, value in MinecraftClient.name2port.items():
@@ -158,7 +162,7 @@ class MinecraftClient:
             MinecraftClient.agent_process[key] = subprocess.Popen(
                 [
                     "python",
-                    "environments/minecraft_utils/minecraft_server.py",
+                    server_script,
                     "-H",
                     host,
                     "-P",
@@ -175,9 +179,14 @@ class MinecraftClient:
                 shell=False,
             )
             print(
-                f'python environments/minecraft_utils/minecraft_server.py -H "{host}" -P {port} -LP {value} -U "{key}" -W "{world}" -D {debug}'
+                f'python {server_script} -H "{host}" -P {port} -LP {value} -U "{key}" -W "{world}" -D {debug}'
             )
-            time.sleep(3)
+            time.sleep(1)
+            if MinecraftClient.agent_process[key].poll() is not None:
+                raise RuntimeError(
+                    f"Minecraft server process for agent '{key}' exited early with code "
+                    f"{MinecraftClient.agent_process[key].returncode}."
+                )
         if verbose:
             print("launch done.")
 

@@ -128,10 +128,15 @@ class MinecraftEnvironment(BaseEnvironment):
     def launch(self):
         MinecraftClient.launch(host=self.host, port=self.port)
         self.logger.info("Minecraft environment launched.")
+        judger_script = os.path.join(
+            os.path.dirname(__file__),
+            "minecraft_utils",
+            "build_judger.py",
+        )
         self.judge = subprocess.Popen(
             [
                 "python",
-                "environments/minecraft_utils/build_judger.py",
+                judger_script,
                 "--idx",
                 str(self.task_id),
                 "--host",
@@ -148,10 +153,15 @@ class MinecraftEnvironment(BaseEnvironment):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        time.sleep(1)
+        if self.judge.poll() is not None:
+            raise RuntimeError(
+                f"Minecraft judger process exited early with code {self.judge.returncode}."
+            )
         # print(f"""python environments/minecraft_utils/build_judger.py --idx {self.task_id} --host \"{self.host}\" --port {self.port} --agent_num {len(self.agents)} --agent_names \"{",".join(self.agents)}\" --task_name \"{self.task_name}\"""")
         self.logger.debug(f"Current working directory: {os.getcwd()}")
         self.logger.debug(
-            f"""python environments/minecraft_utils/build_judger.py --idx {self.task_id} --host \"{self.host}\" --port {self.port} --agent_num {len(self.agents)} --agent_names \"{",".join(self.agents)}\" --task_name \"{self.task_name}\""""
+            f"""python {judger_script} --idx {self.task_id} --host \"{self.host}\" --port {self.port} --agent_num {len(self.agents)} --agent_names \"{",".join(self.agents)}\" --task_name \"{self.task_name}\""" 
         )
         time.sleep(40)
 
