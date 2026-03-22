@@ -44,7 +44,19 @@ def model_prompting(
     except Exception as exc:
         # Some local Ollama models (e.g. phi3:3.8b) reject tool-calling requests.
         # Fall back to plain chat completion when tools are unsupported.
-        if tools and "does not support tools" in str(exc).lower():
+        exc_text = str(exc).lower()
+        tool_calling_unsupported = (
+            "does not support tools" in exc_text
+            or "tool choice requires" in exc_text
+            or "tool-choice" in exc_text
+            or "tool-call-parser" in exc_text
+            or "enable-auto-tool-choice" in exc_text
+        )
+        if tools and tool_calling_unsupported:
+            print(
+                "[WARN] model_prompting: tool-calling request rejected by backend; "
+                "retrying without tools."
+            )
             completion = litellm.completion(
                 model=llm_model,
                 messages=messages,
