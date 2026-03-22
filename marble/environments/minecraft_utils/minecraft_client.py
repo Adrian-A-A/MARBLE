@@ -23,9 +23,16 @@ class MinecraftClient:
     url_prefix = {}
 
     @staticmethod
+    def _url_prefix_file_path() -> str:
+        """Return absolute path to the shared url_prefix.json file."""
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+        return os.path.join(repo_root, "data", "url_prefix.json")
+
+    @staticmethod
     def get_url_prefix() -> dict:
-        if os.path.exists("../data/url_prefix.json"):
-            with open("../data/url_prefix.json", "r") as f:
+        path = MinecraftClient._url_prefix_file_path()
+        if os.path.exists(path):
+            with open(path, "r") as f:
                 url_prefix = json.load(f)
         else:
             url_prefix = {}
@@ -109,7 +116,9 @@ class MinecraftClient:
             return
         url_prefix = MinecraftClient.get_url_prefix()
         url_prefix[name] = f"http://localhost:{local_port}"
-        with open("../data/url_prefix.json", "w") as f:
+        output_path = MinecraftClient._url_prefix_file_path()
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "w") as f:
             json.dump(url_prefix, f)
 
         MinecraftClient.name2port[name] = local_port

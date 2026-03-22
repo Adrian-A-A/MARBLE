@@ -94,6 +94,36 @@ def discover_configs(repo_root: Path, patterns: Sequence[str]) -> List[Path]:
     return sorted(discovered)
 
 
+def get_environment_type_from_config(config_path: Path) -> Optional[str]:
+    """Read environment.type from a MARBLE config file."""
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+    except Exception:  # noqa: BLE001
+        return None
+
+    if not isinstance(config, dict):
+        return None
+    environment = config.get("environment")
+    if not isinstance(environment, dict):
+        return None
+    env_type = environment.get("type")
+    if isinstance(env_type, str):
+        return env_type
+    return None
+
+
+SUPPORTED_ENGINE_ENV_TYPES = {
+    "web",
+    "base",
+    "research",
+    "coding",
+    "worldsimulation",
+    "minecraft",
+    "db",
+}
+
+
 @dataclass
 class RunTask:
     scenario: str
@@ -175,6 +205,26 @@ def build_tasks(
         configs = discover_configs(repo_root, patterns)
         if not configs:
             print(f"[WARN] Scenario '{scenario_name}' matched no configs for patterns: {patterns}")
+            continue
+
+        filtered_configs: List[Path] = []
+        for cfg_path in configs:
+            env_type = get_environment_type_from_config(cfg_path)
+            if env_type is None:
+                filtered_configs.append(cfg_path)
+                continue
+            if env_type.strip().lower() not in SUPPORTED_ENGINE_ENV_TYPES:
+                print(
+                    f"[WARN] Skipping config '{cfg_path.relative_to(repo_root)}' "
+                    f"because environment type '{env_type}' is unsupported by marble.main."
+                )
+                continue
+            filtered_configs.append(cfg_path)
+        configs = filtered_configs
+        if not configs:
+            print(
+                f"[WARN] Scenario '{scenario_name}' has no runnable configs after environment filtering."
+            )
             continue
 
         max_configs = scenario_cfg.get("max_configs")
@@ -750,8 +800,23 @@ def main() -> int:
     failed: List[RunTask] = []
     executed = 0
     task_records: List[Dict[str, Any]] = []
+    skipped_task_indices: set[int] = set()
 
-    for task in tasks:
+    scenario_missing_commands: Dict[str, List[str]] = {}
+    for scenario_name, scenario_cfg in manifest.get("scenarios", {}).items():
+        if not isinstance(scenario_cfg, dict):
+            continue
+        required_commands = scenario_cfg.get("required_commands") or []
+        if not isinstance(required_commands, list):
+            continue
+        missing = [cmd for cmd in required_commands if isinstance(cmd, str) and shutil.which(cmd) is None]
+        if missing:
+            scenario_missing_commands[scenario_name] = missing
+            print(
+                f"[WARN] Scenario '{scenario_name}' will be skipped due to missing commands: {', '.join(missing)}"
+            )
+
+    for index, task in enumerate(tasks):
         scenario_cfg = manifest["scenarios"][task.scenario]
         model_keys = scenario_cfg.get("model_keys") or global_model_keys
         expected_output_file = write_temp_config(
@@ -759,13 +824,18 @@ def main() -> int:
             model_keys=model_keys,
             extra_set_values=extra_set_values,
         )
-        task_records.append(
-            serialize_task_record(
-                repo_root=repo_root,
-                task=task,
-                expected_output_file=expected_output_file,
-            )
+        record = serialize_task_record(
+            repo_root=repo_root,
+            task=task,
+            expected_output_file=expected_output_file,
         )
+        if task.scenario in scenario_missing_commands:
+            record["status"] = "skipped"
+            record["skip_reason"] = (
+                "missing_commands: " + ", ".join(scenario_missing_commands[task.scenario])
+            )
+            skipped_task_indices.add(index)
+        task_records.append(record)
 
     run_payload: Dict[str, Any] = {
         "timestamp": runtime["timestamp"],
@@ -783,6 +853,8 @@ def main() -> int:
 
         model_to_task_indices: Dict[str, List[int]] = {}
         for index, task in enumerate(tasks):
+            if index in skipped_task_indices:
+                continue
             model_to_task_indices.setdefault(task.model, []).append(index)
 
         for model_name, indices in model_to_task_indices.items():
@@ -881,6 +953,8 @@ def main() -> int:
                     break
     else:
         for index, task in enumerate(tasks):
+            if index in skipped_task_indices:
+                continue
             exit_code = run_task(
                 repo_root=repo_root,
                 python_bin=args.python_bin,

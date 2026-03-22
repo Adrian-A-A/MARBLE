@@ -68,6 +68,8 @@ scenarios:
     max_configs: 1
 
   database:
+    required_commands:
+      - docker
     configs:
       - marble/configs/test_config_database/*.yaml
     max_configs: 1
