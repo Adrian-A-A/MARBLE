@@ -158,10 +158,11 @@ class MinecraftEnvironment(BaseEnvironment):
             raise RuntimeError(
                 f"Minecraft judger process exited early with code {self.judge.returncode}."
             )
-        # print(f"""python environments/minecraft_utils/build_judger.py --idx {self.task_id} --host \"{self.host}\" --port {self.port} --agent_num {len(self.agents)} --agent_names \"{",".join(self.agents)}\" --task_name \"{self.task_name}\"""")
         self.logger.debug(f"Current working directory: {os.getcwd()}")
         self.logger.debug(
-            f"""python {judger_script} --idx {self.task_id} --host \"{self.host}\" --port {self.port} --agent_num {len(self.agents)} --agent_names \"{",".join(self.agents)}\" --task_name \"{self.task_name}\""" 
+            f'python {judger_script} --idx {self.task_id} --host "{self.host}" '
+            f'--port {self.port} --agent_num {len(self.agents)} --agent_names "{",".join(self.agents)}" '
+            f'--task_name "{self.task_name}"'
         )
         time.sleep(40)
 
