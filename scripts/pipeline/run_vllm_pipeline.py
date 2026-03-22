@@ -120,9 +120,6 @@ class VLLMServerOptions:
     api_key: str
     clear_vram_after_model: bool
     clear_hf_cache_after_model: bool
-    large_model_threshold_b: float
-    large_model_tensor_parallel_size: int
-    large_model_gpu_ids: str
 
 
 def build_tasks(
@@ -321,27 +318,6 @@ def strip_openai_prefix(model: str) -> str:
     return model
 
 
-def infer_model_size_billions(model_id: str) -> Optional[float]:
-    """Infer model size in billions from common HF naming patterns (e.g., 7B, 70B, 1.5B)."""
-    matches = re.findall(r"(\d+(?:\.\d+)?)\s*[bB]", model_id)
-    if not matches:
-        return None
-    try:
-        return max(float(value) for value in matches)
-    except ValueError:
-        return None
-
-
-def has_vllm_arg(extra_args: str, flag: str) -> bool:
-    """Return true when raw extra args already include a specific vLLM flag."""
-    if not extra_args:
-        return False
-    for token in shlex.split(extra_args):
-        if token == flag or token.startswith(f"{flag}="):
-            return True
-    return False
-
-
 def wait_for_vllm_ready(api_base: str, api_key: str, timeout_sec: int) -> None:
     """Poll vLLM OpenAI-compatible endpoint until model list is reachable."""
     deadline = time.time() + timeout_sec
@@ -365,11 +341,7 @@ def wait_for_vllm_ready(api_base: str, api_key: str, timeout_sec: int) -> None:
     )
 
 
-def build_vllm_serve_command(
-    model: str,
-    opts: VLLMServerOptions,
-    extra_args: str = "",
-) -> List[str]:
+def build_vllm_serve_command(model: str, opts: VLLMServerOptions) -> List[str]:
     """Build `vllm serve` command for one model."""
     command = [
         opts.binary,
@@ -386,8 +358,8 @@ def build_vllm_serve_command(
         command.append("--trust-remote-code")
     if opts.api_key:
         command.extend(["--api-key", opts.api_key])
-    if extra_args:
-        command.extend(shlex.split(extra_args))
+    if opts.extra_args:
+        command.extend(shlex.split(opts.extra_args))
     return command
 
 
@@ -632,32 +604,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--large-model-threshold-b",
-        type=float,
-        default=40.0,
-        help=(
-            "When managing vLLM server on GPU, automatically apply multi-GPU settings "
-            "for models whose inferred size is >= this value in billions (default: 40)."
-        ),
-    )
-    parser.add_argument(
-        "--large-model-tensor-parallel-size",
-        type=int,
-        default=2,
-        help=(
-            "Tensor parallel size to auto-apply for large models when --manage-vllm-server "
-            "is enabled (default: 2)."
-        ),
-    )
-    parser.add_argument(
-        "--large-model-gpu-ids",
-        default="0,1",
-        help=(
-            "CUDA_VISIBLE_DEVICES value used for auto large-model multi-GPU runs "
-            "(default: 0,1). Set empty string to leave CUDA_VISIBLE_DEVICES unchanged."
-        ),
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Prepare tasks and print commands without running MARBLE.",
@@ -731,9 +677,6 @@ def main() -> int:
         api_key=server_api_key,
         clear_vram_after_model=args.clear_vram_after_model,
         clear_hf_cache_after_model=args.clear_hf_cache_after_model,
-        large_model_threshold_b=args.large_model_threshold_b,
-        large_model_tensor_parallel_size=args.large_model_tensor_parallel_size,
-        large_model_gpu_ids=args.large_model_gpu_ids,
     )
 
     main_script = str((repo_root / (global_cfg.get("main_script") or "marble/main.py")).resolve())
@@ -755,11 +698,6 @@ def main() -> int:
     if vllm_opts.enabled:
         print("  vllm_mode : managed-per-model")
         print(f"  vllm_base : {managed_api_base}")
-        print(
-            "  large_gpu : "
-            f">= {vllm_opts.large_model_threshold_b:g}B "
-            f"-> tensor_parallel={vllm_opts.large_model_tensor_parallel_size}"
-        )
     if args.dry_run:
         print("  mode      : dry-run")
 
@@ -798,6 +736,7 @@ def main() -> int:
     write_run_manifest(run_manifest_path, run_payload)
 
     if vllm_opts.enabled and not args.dry_run:
+
         model_to_task_indices: Dict[str, List[int]] = {}
         for index, task in enumerate(tasks):
             model_to_task_indices.setdefault(task.model, []).append(index)
@@ -817,43 +756,10 @@ def main() -> int:
                 server_env["HUGGINGFACE_HUB_CACHE"] = cache_dir
                 server_env["HF_HUB_CACHE"] = cache_dir
 
-            inferred_size_b = infer_model_size_billions(hf_model_id)
-            auto_multi_gpu = (
-                vllm_opts.device != "cpu"
-                and inferred_size_b is not None
-                and inferred_size_b >= vllm_opts.large_model_threshold_b
-                and vllm_opts.large_model_tensor_parallel_size > 1
-            )
-
-            effective_extra_args = vllm_opts.extra_args
-            if auto_multi_gpu and not has_vllm_arg(
-                effective_extra_args, "--tensor-parallel-size"
-            ):
-                effective_extra_args = (
-                    f"{effective_extra_args} --tensor-parallel-size "
-                    f"{vllm_opts.large_model_tensor_parallel_size}"
-                ).strip()
-
-            if auto_multi_gpu and vllm_opts.large_model_gpu_ids.strip():
-                server_env["CUDA_VISIBLE_DEVICES"] = vllm_opts.large_model_gpu_ids.strip()
-
-            serve_cmd = build_vllm_serve_command(
-                hf_model_id,
-                vllm_opts,
-                extra_args=effective_extra_args,
-            )
+            serve_cmd = build_vllm_serve_command(hf_model_id, vllm_opts)
             print("\n[VLLM LOAD]")
             print(f"  model    : {model_name}")
             print(f"  hf_model : {hf_model_id}")
-            if inferred_size_b is not None:
-                print(f"  size_b   : {inferred_size_b:g}")
-            if auto_multi_gpu:
-                print(
-                    "  parallel : auto large-model multi-GPU "
-                    f"(tensor_parallel={vllm_opts.large_model_tensor_parallel_size})"
-                )
-                if server_env.get("CUDA_VISIBLE_DEVICES"):
-                    print(f"  gpus     : {server_env['CUDA_VISIBLE_DEVICES']}")
             print(f"  command  : {' '.join(serve_cmd)}")
             print(f"  log      : {server_log.relative_to(repo_root)}")
 
