@@ -6,6 +6,30 @@ from litellm.types.utils import Message
 from marble.llms.error_handler import api_calling_error_exponential_backoff
 
 
+def _ensure_non_empty_user_message(
+    messages: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    """
+    Some chat templates (e.g. vLLM Qwen tool-calling parsers) require at least one
+    non-empty user message. Add a minimal user turn when missing.
+    """
+    has_non_empty_user = any(
+        message.get("role") == "user" and bool((message.get("content") or "").strip())
+        for message in messages
+    )
+    if has_non_empty_user:
+        return messages
+
+    normalized_messages = list(messages)
+    normalized_messages.append(
+        {
+            "role": "user",
+            "content": "Please provide your response based on the instructions above.",
+        }
+    )
+    return normalized_messages
+
+
 @beartype
 @api_calling_error_exponential_backoff(retries=5, base_wait_time=1)
 def model_prompting(
@@ -28,10 +52,11 @@ def model_prompting(
         base_url = "https://api.ohmygpt.com/v1"
     else:
         base_url = None
+    normalized_messages = _ensure_non_empty_user_message(messages)
     try:
         completion = litellm.completion(
             model=llm_model,
-            messages=messages,
+            messages=normalized_messages,
             max_tokens=max_token_num,
             n=return_num,
             top_p=top_p,
@@ -59,7 +84,7 @@ def model_prompting(
             )
             completion = litellm.completion(
                 model=llm_model,
-                messages=messages,
+                messages=normalized_messages,
                 max_tokens=max_token_num,
                 n=return_num,
                 top_p=top_p,
