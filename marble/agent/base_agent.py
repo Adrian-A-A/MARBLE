@@ -221,10 +221,6 @@ class BaseAgent:
                 stream=None,
             )[0]
         else:
-            tool_choice_mode = "auto"
-            if self.env.__class__.__name__ == "MinecraftEnvironment":
-                # Minecraft tasks require concrete environment actions each turn.
-                tool_choice_mode = "required"
             result = model_prompting(
                 llm_model=self.llm,
                 messages=[{"role": "user", "content": act_task}],
@@ -234,7 +230,7 @@ class BaseAgent:
                 top_p=None,
                 stream=None,
                 tools=tools,
-                tool_choice=tool_choice_mode,
+                tool_choice="auto",
             )[0]
         messages = [
             {"role": "usr", "content": act_task},

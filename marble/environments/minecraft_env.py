@@ -128,6 +128,7 @@ class MinecraftEnvironment(BaseEnvironment):
     def launch(self):
         MinecraftClient.launch(host=self.host, port=self.port)
         self.logger.info("Minecraft environment launched.")
+        marble_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         judger_script = os.path.join(
             os.path.dirname(__file__),
             "minecraft_utils",
@@ -152,6 +153,7 @@ class MinecraftEnvironment(BaseEnvironment):
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            cwd=marble_root,
         )
         time.sleep(1)
         if self.judge.poll() is not None:

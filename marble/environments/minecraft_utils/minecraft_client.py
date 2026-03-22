@@ -150,6 +150,7 @@ class MinecraftClient:
         debug=False,
     ):
         MinecraftClient.port = port
+        marble_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
         server_script = os.path.join(
             os.path.dirname(__file__),
             "minecraft_server.py",
@@ -177,6 +178,7 @@ class MinecraftClient:
                     str(debug),
                 ],
                 shell=False,
+                cwd=marble_root,
             )
             print(
                 f'python {server_script} -H "{host}" -P {port} -LP {value} -U "{key}" -W "{world}" -D {debug}'

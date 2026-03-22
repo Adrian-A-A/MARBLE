@@ -1681,7 +1681,10 @@ async def place_axis(bot, mcData, pathfinder, Vec3, item_name, pos, axis=None):
 
 
 dig_file = "../data/dig_item.json"
-dig_data = json.load(open(dig_file, "r"))
+if os.path.exists(dig_file):
+    dig_data = json.load(open(dig_file, "r"))
+else:
+    dig_data = []
 
 
 def dig_check(bot, item_name):
