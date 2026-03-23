@@ -90,6 +90,7 @@ scenarios:
     required_commands:
       - node
       - npm
+    required_node_major: 22
     configs:
       - marble/configs/test_config_minecraft/*.yaml
     max_configs: 1

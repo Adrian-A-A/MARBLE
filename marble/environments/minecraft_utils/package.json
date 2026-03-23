@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "minecrafthawkeye": "^1.4.15",
+    "minecrafthawkeye": "latest",
     "minecraft-data": "^3.93.0",
     "mineflayer": "4.35.0",
     "mineflayer-collectblock": "^1.7.0",
