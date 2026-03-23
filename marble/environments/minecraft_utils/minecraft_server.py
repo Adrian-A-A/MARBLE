@@ -6,7 +6,7 @@ from random import choice, randint
 
 import names
 from flask import Flask, jsonify, request
-from javascript import require
+from javascript import On, require
 
 from marble.environments.minecraft_utils.env_api import *
 

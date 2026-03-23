@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -21,6 +22,20 @@ class MinecraftClient:
     name2port = {}
     agent_process = {}
     url_prefix = {}
+
+    @staticmethod
+    def _assert_world_server_reachable(host: str, port: int, timeout_sec: int = 5) -> None:
+        """Fail fast when the Minecraft world server endpoint is not accepting TCP connections."""
+        try:
+            with socket.create_connection((host, int(port)), timeout=timeout_sec):
+                return
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "Minecraft world server is unreachable at "
+                f"{host}:{port}. Ensure the game server is running and reachable before "
+                "launching MARBLE minecraft agents. "
+                f"Connection error: {exc}"
+            ) from exc
 
     @staticmethod
     def _url_prefix_file_path() -> str:
@@ -181,6 +196,7 @@ class MinecraftClient:
         ignore_name=[],
         debug=False,
     ):
+        MinecraftClient._assert_world_server_reachable(host=host, port=port, timeout_sec=5)
         MinecraftClient.port = port
         marble_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
         server_script = os.path.join(
