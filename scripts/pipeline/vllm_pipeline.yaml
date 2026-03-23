@@ -25,19 +25,19 @@ global:
 # parser/tool-calling flags for models that need them.
 vllm_model_overrides:
   openai/Qwen/Qwen3.5-0.8B:
-    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen3_xml"
   openai/Qwen/Qwen3.5-2B:
-    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen3_xml"
   openai/Qwen/Qwen3.5-4B:
-    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen3_xml"
   openai/Qwen/Qwen3.5-9B:
-    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen3_xml"
   openai/Qwen/Qwen3.5-27B:
-    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen3_xml"
   openai/Qwen/Qwen3.5-35B-A3B:
-    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen3_xml"
   openai/Qwen/Qwen2.5-72B-Instruct-AWQ:
-    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen3_xml"
   openai/mistralai/Ministral-3-3B-Reasoning-2512:
     extra_args: "--enable-auto-tool-choice --tool-call-parser mistral"
   openai/mistralai/Ministral-3-8B-Reasoning-2512:
@@ -87,6 +87,9 @@ scenarios:
     max_configs: 1
 
   minecraft:
+    required_commands:
+      - node
+      - npm
     configs:
       - marble/configs/test_config_minecraft/*.yaml
     max_configs: 1

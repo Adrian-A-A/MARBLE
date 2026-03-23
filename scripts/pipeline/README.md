@@ -103,6 +103,15 @@ Notes for managed mode:
 - After each model finishes, the runner terminates vLLM and performs best-effort VRAM cache cleanup.
 - With `--clear-hf-cache-after-model`, the runner also deletes that model's local Hugging Face cache directory to free disk before the next model.
 
+Minecraft scenario prerequisites:
+- Node.js 22+ and npm must be installed on the runtime host.
+- Install pinned Minecraft JS dependencies once before running minecraft scenarios:
+```bash
+cd marble/environments/minecraft_utils
+npm install
+```
+- Dependencies are declared in `marble/environments/minecraft_utils/package.json`.
+
 ### Ollama pipeline
 
 **Dry-run to preview tasks:**
