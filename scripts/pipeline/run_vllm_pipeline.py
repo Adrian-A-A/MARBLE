@@ -113,6 +113,26 @@ def get_environment_type_from_config(config_path: Path) -> Optional[str]:
     return None
 
 
+def detect_node_major_version(node_binary: str = "node") -> Tuple[Optional[int], str]:
+    """Return detected Node.js major version and raw version text."""
+    try:
+        result = subprocess.run(
+            [node_binary, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return None, f"error: {exc}"
+
+    raw = (result.stdout or result.stderr or "").strip()
+    match = re.search(r"v?(\d+)\.", raw)
+    if not match:
+        return None, raw or "unknown"
+    return int(match.group(1)), raw
+
+
 SUPPORTED_ENGINE_ENV_TYPES = {
     "web",
     "base",
@@ -802,19 +822,43 @@ def main() -> int:
     task_records: List[Dict[str, Any]] = []
     skipped_task_indices: set[int] = set()
 
-    scenario_missing_commands: Dict[str, List[str]] = {}
+    scenario_skip_reasons: Dict[str, str] = {}
     for scenario_name, scenario_cfg in manifest.get("scenarios", {}).items():
         if not isinstance(scenario_cfg, dict):
             continue
+
         required_commands = scenario_cfg.get("required_commands") or []
         if not isinstance(required_commands, list):
-            continue
+            required_commands = []
+
         missing = [cmd for cmd in required_commands if isinstance(cmd, str) and shutil.which(cmd) is None]
         if missing:
-            scenario_missing_commands[scenario_name] = missing
+            scenario_skip_reasons[scenario_name] = "missing_commands: " + ", ".join(missing)
             print(
                 f"[WARN] Scenario '{scenario_name}' will be skipped due to missing commands: {', '.join(missing)}"
             )
+            continue
+
+        required_node_major = scenario_cfg.get("required_node_major")
+        if isinstance(required_node_major, int) and required_node_major > 0:
+            node_major, node_raw = detect_node_major_version("node")
+            if node_major is None:
+                scenario_skip_reasons[scenario_name] = (
+                    "node_version_unreadable: " + str(node_raw)
+                )
+                print(
+                    f"[WARN] Scenario '{scenario_name}' will be skipped because Node version "
+                    f"could not be determined (node --version output: {node_raw})."
+                )
+            elif node_major < required_node_major:
+                node_path = shutil.which("node") or "node"
+                scenario_skip_reasons[scenario_name] = (
+                    f"node_major_too_low: required>={required_node_major}, found={node_raw}, path={node_path}"
+                )
+                print(
+                    f"[WARN] Scenario '{scenario_name}' will be skipped because Node >= "
+                    f"{required_node_major} is required, but found {node_raw} at {node_path}."
+                )
 
     for index, task in enumerate(tasks):
         scenario_cfg = manifest["scenarios"][task.scenario]
@@ -829,11 +873,9 @@ def main() -> int:
             task=task,
             expected_output_file=expected_output_file,
         )
-        if task.scenario in scenario_missing_commands:
+        if task.scenario in scenario_skip_reasons:
             record["status"] = "skipped"
-            record["skip_reason"] = (
-                "missing_commands: " + ", ".join(scenario_missing_commands[task.scenario])
-            )
+            record["skip_reason"] = scenario_skip_reasons[task.scenario]
             skipped_task_indices.add(index)
         task_records.append(record)
 
