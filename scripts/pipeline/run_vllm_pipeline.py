@@ -152,6 +152,26 @@ class VLLMServerOptions:
     clear_hf_cache_after_model: bool
 
 
+def resolve_model_specific_vllm_extra_args(manifest: Dict[str, Any], model: str) -> str:
+    """Return optional per-model `vllm serve` extra args from manifest overrides."""
+    overrides = manifest.get("vllm_model_overrides")
+    if not isinstance(overrides, dict):
+        return ""
+
+    hf_model = strip_openai_prefix(model)
+    for key in (model, hf_model):
+        value = overrides.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            extra_args = value.get("extra_args")
+            if isinstance(extra_args, str):
+                return extra_args.strip()
+    return ""
+
+
 def build_tasks(
     repo_root: Path,
     manifest: Dict[str, Any],
@@ -435,7 +455,11 @@ def wait_for_vllm_chat_ready(
     )
 
 
-def build_vllm_serve_command(model: str, opts: VLLMServerOptions) -> List[str]:
+def build_vllm_serve_command(
+    model: str,
+    opts: VLLMServerOptions,
+    model_specific_extra_args: str = "",
+) -> List[str]:
     """Build `vllm serve` command for one model."""
     command = [
         opts.binary,
@@ -452,8 +476,11 @@ def build_vllm_serve_command(model: str, opts: VLLMServerOptions) -> List[str]:
         command.append("--trust-remote-code")
     if opts.api_key:
         command.extend(["--api-key", opts.api_key])
-    if opts.extra_args:
-        command.extend(shlex.split(opts.extra_args))
+    merged_extra_args = " ".join(
+        part.strip() for part in [opts.extra_args, model_specific_extra_args] if part and part.strip()
+    )
+    if merged_extra_args:
+        command.extend(shlex.split(merged_extra_args))
     return command
 
 
@@ -860,6 +887,10 @@ def main() -> int:
         for model_name, indices in model_to_task_indices.items():
             hf_model_id = strip_openai_prefix(model_name)
             model_slug = safe_slug(model_name)
+            model_specific_extra_args = resolve_model_specific_vllm_extra_args(
+                manifest=manifest,
+                model=model_name,
+            )
             server_log = runtime["output_root"] / "vllm_server_logs" / f"{model_slug}.log"
             server_log.parent.mkdir(parents=True, exist_ok=True)
 
@@ -872,10 +903,16 @@ def main() -> int:
                 server_env["HUGGINGFACE_HUB_CACHE"] = cache_dir
                 server_env["HF_HUB_CACHE"] = cache_dir
 
-            serve_cmd = build_vllm_serve_command(hf_model_id, vllm_opts)
+            serve_cmd = build_vllm_serve_command(
+                hf_model_id,
+                vllm_opts,
+                model_specific_extra_args=model_specific_extra_args,
+            )
             print("\n[VLLM LOAD]")
             print(f"  model    : {model_name}")
             print(f"  hf_model : {hf_model_id}")
+            if model_specific_extra_args:
+                print(f"  model_args: {model_specific_extra_args}")
             print(f"  command  : {' '.join(serve_cmd)}")
             print(f"  log      : {server_log.relative_to(repo_root)}")
 

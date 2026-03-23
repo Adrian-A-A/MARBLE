@@ -141,6 +141,38 @@ class MinecraftClient:
         return str(response.json())
 
     @staticmethod
+    def _wait_for_agent_server(
+        agent_name: str,
+        local_port: int,
+        process: subprocess.Popen,
+        timeout_sec: int = 120,
+    ) -> None:
+        """Wait until one minecraft_server Flask process is reachable on /hello."""
+        deadline = time.time() + timeout_sec
+        url = f"http://localhost:{local_port}/hello"
+        last_error = "unknown"
+
+        while time.time() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(
+                    f"Minecraft server process for agent '{agent_name}' exited with "
+                    f"code {process.returncode} before becoming ready."
+                )
+            try:
+                response = requests.get(url, timeout=3)
+                if response.status_code == 200:
+                    return
+                last_error = f"HTTP {response.status_code}"
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+            time.sleep(1)
+
+        raise RuntimeError(
+            f"Minecraft server for agent '{agent_name}' did not become ready on {url} "
+            f"within {timeout_sec}s (last error: {last_error})."
+        )
+
+    @staticmethod
     def launch(
         host="localhost",
         port=25565,
@@ -183,12 +215,12 @@ class MinecraftClient:
             print(
                 f'python {server_script} -H "{host}" -P {port} -LP {value} -U "{key}" -W "{world}" -D {debug}'
             )
-            time.sleep(1)
-            if MinecraftClient.agent_process[key].poll() is not None:
-                raise RuntimeError(
-                    f"Minecraft server process for agent '{key}' exited early with code "
-                    f"{MinecraftClient.agent_process[key].returncode}."
-                )
+            MinecraftClient._wait_for_agent_server(
+                agent_name=key,
+                local_port=value,
+                process=MinecraftClient.agent_process[key],
+                timeout_sec=120,
+            )
         if verbose:
             print("launch done.")
 

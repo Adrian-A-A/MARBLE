@@ -98,6 +98,8 @@ python scripts/pipeline/run_vllm_pipeline.py --manage-vllm-server --models opena
 Notes for managed mode:
 - Models in `scripts/pipeline/vllm_pipeline.yaml` can stay in LiteLLM-style form (`openai/<hf_repo_id>`).
 - The runner strips `openai/` when launching `vllm serve` so Hugging Face repo IDs load correctly.
+- Configure per-model parser/tool-calling flags in `vllm_model_overrides` inside `scripts/pipeline/vllm_pipeline.yaml`.
+- Per-model `extra_args` are merged after CLI `--vllm-extra-args` and applied automatically when each model is served.
 - After each model finishes, the runner terminates vLLM and performs best-effort VRAM cache cleanup.
 - With `--clear-hf-cache-after-model`, the runner also deletes that model's local Hugging Face cache directory to free disk before the next model.
 

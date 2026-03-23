@@ -19,6 +19,30 @@ global:
     # Common placeholder value for local OpenAI-compatible servers.
     OPENAI_API_KEY: EMPTY
 
+# Optional per-model vLLM serve overrides used in managed mode.
+# Keys can be either `openai/<hf_repo_id>` or raw `<hf_repo_id>`.
+# `extra_args` are merged after CLI `--vllm-extra-args` and can include
+# parser/tool-calling flags for models that need them.
+vllm_model_overrides:
+  openai/Qwen/Qwen3.5-0.8B:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+  openai/Qwen/Qwen3.5-2B:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+  openai/Qwen/Qwen3.5-4B:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+  openai/Qwen/Qwen3.5-9B:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+  openai/Qwen/Qwen3.5-27B:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+  openai/Qwen/Qwen3.5-35B-A3B:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+  openai/Qwen/Qwen2.5-72B-Instruct-AWQ:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser qwen25"
+  openai/mistralai/Ministral-3-3B-Reasoning-2512:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser mistral"
+  openai/mistralai/Ministral-3-8B-Reasoning-2512:
+    extra_args: "--enable-auto-tool-choice --tool-call-parser mistral"
+
 model_sets:
   tiny:
     description: "Tiny local models (0.8B-3B)"
