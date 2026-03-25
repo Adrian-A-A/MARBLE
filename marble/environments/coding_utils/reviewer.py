@@ -2,7 +2,7 @@ import datetime
 import json
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ruamel.yaml import YAML
 
@@ -21,8 +21,22 @@ def log_debug_info(message: str, log_file: str = "marble/logs/advice_log"):
         f.write("\n===== End Debug Info =====\n")
 
 
+def _resolve_model_name(env: Any, model_name: Optional[str]) -> str:
+    """Resolve model name from explicit arg, then environment config, then fallback."""
+    if model_name and model_name.strip():
+        return model_name
+
+    env_config = getattr(env, "config", {})
+    if isinstance(env_config, dict):
+        configured_model = env_config.get("llm")
+        if isinstance(configured_model, str) and configured_model.strip():
+            return configured_model
+
+    return "gpt-3.5-turbo"
+
+
 def give_advice_and_revise_handler(
-    env, task_description: str, model_name: str
+    env, task_description: str, model_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Reads solution.py content, provides improvement suggestions based on task description, and revises the code accordingly.
@@ -95,8 +109,10 @@ def give_advice_and_revise_handler(
             "Provide ONE most critical suggestion in the specified format."
         )
 
+        resolved_model = _resolve_model_name(env, model_name)
+
         response_advice = model_prompting(
-            model_name,
+            resolved_model,
             messages=[
                 {"role": "system", "content": system_prompt_advice},
                 {"role": "user", "content": user_prompt_advice},
@@ -136,7 +152,7 @@ def give_advice_and_revise_handler(
         )
 
         response_strategy = model_prompting(
-            model_name,
+            resolved_model,
             messages=[
                 {"role": "system", "content": system_prompt_strategy},
                 {"role": "user", "content": user_prompt_strategy},
@@ -268,11 +284,10 @@ def register_reviewer_actions(env):
                         },
                         "model_name": {
                             "type": "string",
-                            "description": "Name of the LLM model to use",
-                            "default": "gpt-3.5-turbo",
+                            "description": "Name of the LLM model to use (optional; defaults to environment llm)",
                         },
                     },
-                    "required": ["task_description", "model_name"],
+                    "required": ["task_description"],
                     "additionalProperties": False,
                 },
             },

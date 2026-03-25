@@ -12,7 +12,18 @@ import names
 import yaml
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-from colorama import Fore, Style, init
+try:
+    from colorama import Fore, Style, init
+except Exception:  # noqa: BLE001
+    # Allow running without colorama by falling back to no-op color codes.
+    class _NoColor:
+        def __getattr__(self, _: str) -> str:
+            return ""
+
+    Fore = Style = _NoColor()
+
+    def init(*_args: Any, **_kwargs: Any) -> None:
+        return None
 
 from marble.agent.werewolf_agent import WerewolfAgent
 from marble.utils.eventbus import EventBus
@@ -39,6 +50,10 @@ class WerewolfEnv:
 
         # Load the system_prompt.yaml file
         system_prompt_path = self.config.get("system_prompt_path")
+        if isinstance(system_prompt_path, str):
+            system_prompt_path = os.path.normpath(
+                system_prompt_path.replace("\\", os.sep)
+            )
         if not system_prompt_path or not os.path.exists(system_prompt_path):
             raise FileNotFoundError(
                 f"System prompt file '{system_prompt_path}' not found."
@@ -730,6 +745,8 @@ class WerewolfEnv:
 
         # Get the list of alive players and werewolf count
         alive_players = self.shared_memory["public_state"]["alive_players"]
+        current_day = int(self.shared_memory["public_state"].get("days", 0))
+        max_days = int(self.config.get("rounds", 0) or 0)
         surviving_players = [
             {"player_id": player_id, "role": self.get_player_role(player_id)}
             for player_id in alive_players
@@ -752,8 +769,25 @@ class WerewolfEnv:
         # Define the return result
         result = {"terminated": False, "result": None, "details": None}
 
+        # Guardrail: stop runaway games when no elimination progress is made.
+        if max_days > 0 and current_day >= max_days:
+            result["terminated"] = True
+            result["result"] = "Round limit reached"
+            result["details"] = {
+                "game_status": (
+                    f"Game ends: reached configured round limit ({max_days}) "
+                    "before a side was eliminated."
+                ),
+                "winner": "Undecided",
+                "alive_players": alive_players,
+                "werewolf_count": werewolf_count,
+                "non_werewolf_count": non_werewolf_count,
+                "days": current_day,
+            }
+            self.shared_memory["public_state"]["game_result"] = result["result"]
+
         # Check if game termination conditions are met
-        if werewolf_count > 0 and non_werewolf_count == 0:
+        if not result["terminated"] and werewolf_count > 0 and non_werewolf_count == 0:
             result["terminated"] = True
             result["result"] = "Werewolves win"
             result["details"] = {
@@ -765,7 +799,7 @@ class WerewolfEnv:
             }
             self.shared_memory["public_state"]["game_result"] = result["result"]
 
-        elif werewolf_count == 0:
+        elif not result["terminated"] and werewolf_count == 0:
             result["terminated"] = True
             result["result"] = "Villagers win"
             result["details"] = {
@@ -2474,7 +2508,13 @@ class WerewolfEnv:
             )
 
             if continue_running:
-                day_cache["final_candidate"].append(candidate_id)
+                if candidate_id not in day_cache["final_candidate"]:
+                    day_cache["final_candidate"].append(candidate_id)
+                final_candidate_store = self.shared_memory["private_state"][
+                    "sheriff_election"
+                ].setdefault("final_candidate", [])
+                if candidate_id not in final_candidate_store:
+                    final_candidate_store.append(candidate_id)
             else:
                 self.log_event(
                     is_private=False,
@@ -2510,12 +2550,14 @@ class WerewolfEnv:
         to all eligible players. Eligible players are those who are alive and have not participated in the sheriff election.
         """
         # Step 1: Get the election log and list of candidates
-        election_log = self.shared_memory["private_state"]["sheriff_election"].get(
-            "sheriff_speech", {}
-        )
-        final_candidates = self.shared_memory["private_state"]["sheriff_election"].get(
-            "final_candidate", []
-        )
+        current_day = self.shared_memory["public_state"]["days"]
+        day_cache = self.shared_memory["public_state"]["day_cache"][current_day - 1]
+        election_log = day_cache.get("sheriff_speech") or self.shared_memory[
+            "private_state"
+        ]["sheriff_election"].get("sheriff_speech", {})
+        final_candidates = day_cache.get("final_candidate") or self.shared_memory[
+            "private_state"
+        ]["sheriff_election"].get("final_candidate", [])
 
         # Convert election log to a formatted string
         election_log_str = "\n".join(
@@ -2575,12 +2617,17 @@ class WerewolfEnv:
         Args:
             event (dict): Contains the voting event details, including the player ID and their vote.
         """
-        # Step 1: Record the vote
+        # Step 1: Read the vote payload
         voter_id = event.get("sender", None)
         if isinstance(event.get("content", {}), dict):
             vote_choice = event.get("content", {}).get("action_vote", "abstain")
         else:
             vote_choice = "abstain"
+
+        if not isinstance(vote_choice, str):
+            vote_choice = "abstain"
+        vote_choice = vote_choice.strip()
+
         # Get current day and day cache
         current_day = self.shared_memory["public_state"]["days"]
         day_cache = self.shared_memory["public_state"]["day_cache"][current_day - 1]
@@ -2590,6 +2637,24 @@ class WerewolfEnv:
             day_cache["sheriff_votes"] = {}
         if "sheriff_result" not in day_cache:
             day_cache["sheriff_result"] = None
+        if "sheriff_invalid_vote_attempts" not in day_cache:
+            day_cache["sheriff_invalid_vote_attempts"] = []
+
+        # Validate vote values server-side: candidate id or abstain only.
+        final_candidates = day_cache.get("final_candidate") or self.shared_memory[
+            "private_state"
+        ]["sheriff_election"].get("final_candidate", [])
+        allowed_votes = set(final_candidates)
+        allowed_votes.add("abstain")
+
+        if vote_choice not in allowed_votes:
+            day_cache["sheriff_invalid_vote_attempts"].append(
+                {"voter": voter_id, "attempted_vote": vote_choice}
+            )
+            self._log_event(
+                f"Invalid sheriff vote '{vote_choice}' from {voter_id}; coercing to abstain."
+            )
+            vote_choice = "abstain"
 
         # Store the vote in day_cache
         day_cache["sheriff_votes"][voter_id] = vote_choice
@@ -2987,6 +3052,12 @@ class WerewolfEnv:
             vote_choice = event.get("content", {}).get("action_vote", "abstain")
         else:
             vote_choice = "abstain"
+
+        if not isinstance(vote_choice, str):
+            vote_choice = "abstain"
+        vote_choice = vote_choice.strip()
+        raw_vote_choice = vote_choice
+
         # Get current day and day cache
         day_cache = self.shared_memory["public_state"]["day_cache"][-1]
 
@@ -2995,6 +3066,25 @@ class WerewolfEnv:
             day_cache["banishment_votes"] = {}
         if "banishment_result" not in day_cache:
             day_cache["banishment_result"] = None
+        if "banishment_invalid_vote_attempts" not in day_cache:
+            day_cache["banishment_invalid_vote_attempts"] = []
+
+        # Validate vote values server-side: alive player id or abstain only.
+        alive_players = self.shared_memory["public_state"]["alive_players"]
+        allowed_votes = set(alive_players)
+        allowed_votes.add("abstain")
+
+        if vote_choice not in allowed_votes:
+            day_cache["banishment_invalid_vote_attempts"].append(
+                {
+                    "voter": voter_id,
+                    "attempted_vote": raw_vote_choice,
+                }
+            )
+            self._log_event(
+                f"Invalid banishment vote '{raw_vote_choice}' from {voter_id}; coercing to abstain."
+            )
+            vote_choice = "abstain"
 
         # Store the vote in day_cache
         day_cache["banishment_votes"][voter_id] = vote_choice

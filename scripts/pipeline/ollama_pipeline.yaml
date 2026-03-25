@@ -46,11 +46,6 @@ scenarios:
       - marble/configs/test_config_research/*.yaml
     max_configs: 1 # There are 3 configs in test_config_research.
 
-  minecraft:
-    configs:
-      - marble/configs/test_config_minecraft/*.yaml
-    max_configs: 1 # There are 100 tasks in total in test_config_minecraft (although config has 500 because author ran 100x5 models).
-
   database:
     configs:
       - marble/configs/test_config_database/*.yaml

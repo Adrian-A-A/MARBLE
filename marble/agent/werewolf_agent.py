@@ -1,7 +1,10 @@
+import ast
 import json
 import logging
 import os
 import time
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict
 
 import yaml
@@ -45,13 +48,17 @@ class WerewolfAgent:
         model_config = config.get(config_key, {})
         self.config = config
         # Get and save API configuration details as attributes
-        self.base_url = model_config.get(
-            "base_url", "https://api.openai.com/v1"
-        )  # Default to OpenAI API
-        self.api_key = model_config.get(
-            "api_key", config.get("openai_api_key")
-        )  # Default to using general OpenAI API key
+        self.base_url = os.getenv(
+            "OPENAI_API_BASE",
+            model_config.get("base_url", "https://api.openai.com/v1"),
+        )
+        self.api_key = os.getenv(
+            "OPENAI_API_KEY",
+            model_config.get("api_key", config.get("openai_api_key")),
+        )
         self.model_name = model_config.get("model_name", "gpt-4o")  # Default to GPT-4
+        if isinstance(self.model_name, str) and self.model_name.startswith("openai/"):
+            self.model_name = self.model_name[len("openai/") :]
         self.strategy = strategy
         # Initialize the API client
         self.client = OpenAI(
@@ -237,7 +244,14 @@ class WerewolfAgent:
                 }
             except Exception as e:
                 self.logger.error(f"Error while performing action {event_type}: {e}")
-                result["content"] = {"error": str(e)}
+                fallback_content = {"attack": False, "target": None, "error": str(e)}
+                result = {
+                    "event_type": "reply_werewolf_action",
+                    "sender": self.agent_id,
+                    "recipients": [self.env],
+                    "content": fallback_content,
+                }
+                result_content = {"action": fallback_content}
         else:
             try:
                 # Call a general method for other events
@@ -250,7 +264,16 @@ class WerewolfAgent:
                 }
             except Exception as e:
                 self.logger.error(f"Error while performing action {event_type}: {e}")
-                result["content"] = {"error": str(e)}
+                fallback_content = self._fallback_action_for_event(event_type)
+                if isinstance(fallback_content, dict):
+                    fallback_content["error"] = str(e)
+                result = {
+                    "event_type": reply_event_type,
+                    "sender": self.agent_id,
+                    "recipients": [self.env],
+                    "content": fallback_content,
+                }
+                result_content = {"action": fallback_content}
 
         self._write_log_entry(str(result_content))
 
@@ -337,7 +360,40 @@ class WerewolfAgent:
         """
         self.event_bus.publish(action)
 
-    def gpt_tool_call(self, messages, tools):
+    def _fallback_action_for_event(self, event_type: str) -> Dict[str, Any]:
+        """Return conservative fallback payloads so event processing can continue."""
+        if event_type == "vote_action":
+            return {"action_vote": "abstain"}
+        if event_type == "vote_for_sheriff":
+            return {"action_vote": "abstain"}
+        if event_type == "run_for_sheriff":
+            return {"run_for_sheriff": False}
+        if event_type == "sheriff_speech":
+            return {
+                "continue_running": False,
+                "speech_content": f"Error during generation for player {self.agent_id}.",
+            }
+        if event_type == "player_speech":
+            return {
+                "speech_content": f"Error during generation for player {self.agent_id}.",
+            }
+        if event_type == "guard_action":
+            return {"protect_target": self.agent_id}
+        if event_type == "seer_action":
+            return {"check_target": self.agent_id}
+        if event_type == "witch_action":
+            return {
+                "use_antidote": False,
+                "use_poison": False,
+                "poison_target": self.agent_id,
+            }
+        if event_type == "decide_speech_sequence":
+            return {"starting_player": self.agent_id, "from_left": True}
+        if event_type == "badge_flow":
+            return {"pass_badge": False, "badge_receiver": None}
+        return {"action": "no_action", "target": None}
+
+    def gpt_tool_call(self, messages, tools, forced_function_name=None):
         """
         Calls the GPT model using the specified messages and tools.
 
@@ -352,14 +408,38 @@ class WerewolfAgent:
         while True:
             rounds += 1
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model_name,  # Use self.model_name instead of hardcoded model name
-                    messages=messages,
-                    tools=tools,
-                    tool_choice="required",
-                    temperature=0.7,  # Set temperature to 0.7 for more diverse results
-                    n=1,
+                tool_messages = list(messages)
+                instruction = (
+                    "When calling the function, return strictly valid JSON arguments only. "
+                    "Use double-quoted keys/strings and escape inner quotes/newlines as needed. "
+                    "Do not return Python dict literals or markdown code fences."
                 )
+
+                # Keep role ordering valid for strict chat templates (avoid user+user tails).
+                if tool_messages and tool_messages[-1].get("role") == "user":
+                    last_content = tool_messages[-1].get("content", "")
+                    sep = "\n\n" if last_content else ""
+                    tool_messages[-1]["content"] = f"{last_content}{sep}{instruction}"
+                else:
+                    tool_messages.append({"role": "user", "content": instruction})
+                request_kwargs = {
+                    "model": self.model_name,
+                    "messages": tool_messages,
+                    "tools": tools,
+                    "max_tokens": 256,
+                    "temperature": 0,
+                    "n": 1,
+                    "timeout": 90,
+                }
+                if forced_function_name:
+                    request_kwargs["tool_choice"] = {
+                        "type": "function",
+                        "function": {"name": forced_function_name},
+                    }
+                else:
+                    request_kwargs["tool_choice"] = "required"
+
+                response = self.client.chat.completions.create(**request_kwargs)
                 tool_calls = response.choices[0].message.tool_calls
                 return tool_calls
             except Exception as e:
@@ -367,6 +447,153 @@ class WerewolfAgent:
                 time.sleep(5)
                 if rounds > 3:
                     raise Exception("Chat Completion failed too many times")
+
+    def _call_action_tool(self, messages, tools, event_type: str) -> Dict[str, Any]:
+        """Use strict tool-calling and return no_action on failure."""
+        forced_function_name = self._primary_function_name(tools)
+        normalized_tools = self._normalize_action_tool_schema(tools)
+
+        try:
+            parse_errors = []
+            raw_attempts = []
+            for _ in range(2):
+                raw_arguments = self._first_tool_call_arguments(
+                    self.gpt_tool_call(
+                        messages,
+                        normalized_tools,
+                        forced_function_name=forced_function_name,
+                    )
+                )
+                raw_attempts.append(raw_arguments)
+
+                try:
+                    parsed = self._parse_tool_arguments(raw_arguments)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception as parse_error:
+                    parse_errors.append(str(parse_error))
+
+            attempt_preview = " | ".join(
+                [self._preview_tool_arguments(payload) for payload in raw_attempts]
+            )
+            raise ValueError(
+                "Tool call arguments must decode to a JSON object. "
+                f"Parse attempts failed: {' | '.join(parse_errors)}. "
+                f"Raw attempt previews: {attempt_preview}"
+            )
+        except Exception as tool_error:
+            self.logger.error(f"Error during {event_type}'s tool call: {tool_error}")
+            return {"action": "no_action", "target": None}
+
+    @staticmethod
+    def _parse_tool_arguments(raw_arguments: str) -> Dict[str, Any]:
+        """Parse tool-call arguments from common valid encodings emitted by model parsers."""
+        if not isinstance(raw_arguments, str):
+            raise ValueError("Tool call arguments are not a string payload")
+
+        normalized = raw_arguments.strip()
+        if normalized.startswith("```"):
+            # Strip optional markdown fencing that some models add around JSON.
+            lines = [line for line in normalized.splitlines() if not line.strip().startswith("```")]
+            normalized = "\n".join(lines).strip()
+
+        # Try full payload first, then a best-effort object slice.
+        candidates = [normalized]
+        first = normalized.find("{")
+        last = normalized.rfind("}")
+        if 0 <= first < last:
+            sliced = normalized[first : last + 1].strip()
+            if sliced and sliced not in candidates:
+                candidates.append(sliced)
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+
+        try:
+            # Fallback for Python-literal dict strings with single quotes.
+            parsed = ast.literal_eval(normalized)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        raise ValueError("Tool call arguments are not a JSON/Python dict object")
+
+    @staticmethod
+    def _first_tool_call_arguments(tool_calls: Any) -> str:
+        """Return first tool-call arguments or raise a clear error for invalid payloads."""
+        if not tool_calls:
+            raise ValueError("No tool calls returned by model")
+
+        first_call = tool_calls[0]
+        function_obj = getattr(first_call, "function", None)
+        arguments = getattr(function_obj, "arguments", None)
+        if not arguments:
+            raise ValueError("First tool call has no function arguments")
+
+        return arguments
+
+    @staticmethod
+    def _preview_tool_arguments(arguments: Any, max_len: int = 200) -> str:
+        """Return a concise single-line preview of raw tool arguments for logging."""
+        try:
+            preview = str(arguments).replace("\n", "\\n")
+        except Exception:
+            preview = "<unprintable arguments>"
+
+        if len(preview) > max_len:
+            return preview[:max_len] + "..."
+        return preview
+
+    @staticmethod
+    def _primary_function_name(tools: Any) -> str | None:
+        if not isinstance(tools, list) or not tools:
+            return None
+        first_tool = tools[0]
+        if not isinstance(first_tool, dict):
+            return None
+        function_obj = first_tool.get("function", {})
+        if not isinstance(function_obj, dict):
+            return None
+        name = function_obj.get("name")
+        return name if isinstance(name, str) and name else None
+
+    @staticmethod
+    def _normalize_action_tool_schema(tools: Any) -> Any:
+        """Keep strict function-calling but only require the actionable payload."""
+        if not isinstance(tools, list):
+            return tools
+
+        normalized = deepcopy(tools)
+        for tool in normalized:
+            if not isinstance(tool, dict):
+                continue
+            function_obj = tool.get("function", {})
+            if not isinstance(function_obj, dict):
+                continue
+            parameters = function_obj.get("parameters", {})
+            if not isinstance(parameters, dict):
+                continue
+
+            properties = parameters.get("properties", {})
+            if not isinstance(properties, dict):
+                continue
+            action_schema = properties.get("action")
+            if action_schema is None:
+                continue
+
+            function_obj["parameters"] = {
+                "type": "object",
+                "properties": {"action": action_schema},
+                "required": ["action"],
+            }
+
+        return normalized
 
     def _wolf_action(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -388,9 +615,11 @@ class WerewolfAgent:
             self.logger.error(f"Invalid event type for werewolf action: {event_type}")
             return {"action": "no_action", "target": None}
 
+        resolved_yaml_path = self._resolve_prompt_path(yaml_path)
+
         # Step 3: Load YAML template
         try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
+            with open(resolved_yaml_path, "r", encoding="utf-8") as f:
                 action_template = yaml.safe_load(f)
             prompt_template = action_template.get("user", "")
             tools = action_template.get("tools", [])
@@ -439,7 +668,7 @@ class WerewolfAgent:
             filled_prompt = filled_prompt.replace(
                 "<<game_state>>", json.dumps(game_state, indent=2)
             )
-            filled_prompt = prompt_template.replace(
+            filled_prompt = filled_prompt.replace(
                 "<<player info>>",
                 f"Alive players: {alive_players_str}\nAlive werewolves: {alive_werewolves_str}",
             )
@@ -477,14 +706,18 @@ class WerewolfAgent:
         ]
 
         # Step 7: Call GPT tool to decide the action
-        try:
-            tool_calls = json.loads(
-                self.gpt_tool_call(messages, tools)[0].function.arguments
-            )
-            return tool_calls
-        except Exception as e:
-            self.logger.error(f"Error during {event_type}'s tool call: {e}")
-            return {"action": "no_action", "target": None}
+        return self._call_action_tool(messages, tools, event_type)
+
+    @staticmethod
+    def _resolve_prompt_path(raw_path: str) -> str:
+        """Resolve prompt paths from config constants across OS path separators."""
+        normalized = raw_path.replace("\\", "/")
+        path = Path(normalized)
+        if path.is_absolute():
+            return str(path)
+
+        repo_root = Path(__file__).resolve().parents[2]
+        return str((repo_root / path).resolve())
 
     def _perform_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -521,9 +754,11 @@ class WerewolfAgent:
             self.logger.error(f"Invalid event type: {event_type}")
             return {"action": "no_action", "target": None}
 
+        resolved_yaml_path = self._resolve_prompt_path(yaml_path)
+
         # Step 3: Load the prompt template and tools for the given action from YAML
         try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
+            with open(resolved_yaml_path, "r", encoding="utf-8") as f:
                 action_template = yaml.safe_load(f)
             prompt_template = action_template.get("user", "")
             tools = action_template.get("tools", [])
@@ -824,11 +1059,4 @@ class WerewolfAgent:
         ]
 
         # Step 7: Call the GPT tool to decide the action
-        try:
-            tool_calls = json.loads(
-                self.gpt_tool_call(messages, tools)[0].function.arguments
-            )
-            return tool_calls
-        except Exception as e:
-            self.logger.error(f"Error during {event_type}'s tool call: {e}")
-            return {"action": "no_action", "target": None}
+        return self._call_action_tool(messages, tools, event_type)

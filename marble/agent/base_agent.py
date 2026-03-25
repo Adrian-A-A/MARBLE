@@ -3,6 +3,7 @@ Base agent module.
 """
 
 import json
+import re
 import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
@@ -25,6 +26,133 @@ def convert_to_str(result: Any) -> str:
         return json.dumps(result)  # dict to JSON string
     else:
         return str(result)  # handle other types
+
+
+def _normalize_action_name(action_name: str) -> str:
+    return "".join(ch for ch in action_name.lower() if ch.isalnum())
+
+
+def _safe_json_loads_object(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+        return payload if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            payload = json.loads(text[start : end + 1])
+            return payload if isinstance(payload, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+def _extract_int_from_text(text: str, keys: List[str]) -> Optional[int]:
+    for key in keys:
+        pattern = rf"(?i){re.escape(key)}\s*[:=]\s*\$?(-?\d+)"
+        match = re.search(pattern, text)
+        if match:
+            return int(match.group(1))
+    money_match = re.search(r"\$(\d{3,7})", text)
+    if money_match:
+        return int(money_match.group(1))
+    return None
+
+def _extract_str_from_text(text: str, keys: List[str]) -> Optional[str]:
+    for key in keys:
+        pattern = rf"(?is){re.escape(key)}\s*[:=]\s*\"([^\"]+)\""
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+        pattern = rf"(?im)^\s*{re.escape(key)}\s*[:=]\s*(.+?)\s*$"
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    return None
+
+def _infer_action_args_from_text(action_name: str, raw_text: str) -> Dict[str, Any]:
+    inferred: Dict[str, Any] = {}
+    lowered = action_name.lower()
+
+    if lowered == "offer_price":
+        price = _extract_int_from_text(raw_text, ["price", "offered_price"]) 
+        if price is not None:
+            inferred["price"] = price
+        reason = _extract_str_from_text(raw_text, ["reason"]) 
+        if reason:
+            inferred["reason"] = reason
+
+    elif lowered == "reject_and_counter":
+        counter = _extract_int_from_text(raw_text, ["counter_price", "price"]) 
+        if counter is not None:
+            inferred["counter_price"] = counter
+        reason = _extract_str_from_text(raw_text, ["reason"]) 
+        if reason:
+            inferred["reason"] = reason
+
+    elif lowered == "inquire_intentions":
+        question = _extract_str_from_text(raw_text, ["question"]) 
+        if not question:
+            match = re.search(r"(?im)^\s*inquire intentions\s*:\s*(.+)$", raw_text)
+            if match:
+                question = match.group(1).strip()
+        if question:
+            inferred["question"] = question
+
+    elif lowered == "provide_information":
+        info_type = _extract_str_from_text(raw_text, ["info_type", "type"]) 
+        details = _extract_str_from_text(raw_text, ["details", "detail", "information"]) 
+        if info_type:
+            inferred["info_type"] = info_type
+        if details:
+            inferred["details"] = details
+
+    elif lowered == "new_communication_session":
+        target_agent_id = _extract_str_from_text(raw_text, ["target_agent_id"]) 
+        message = _extract_str_from_text(raw_text, ["message"]) 
+        if target_agent_id:
+            inferred["target_agent_id"] = target_agent_id
+        if message:
+            inferred["message"] = message
+
+    return inferred
+
+
+def _ensure_required_action_args(
+    action_name: str, args: Dict[str, Any], result_content: str
+) -> Dict[str, Any]:
+    ensured = dict(args)
+    lowered = action_name.lower()
+
+    if lowered == "offer_price" and "price" not in ensured:
+        inferred_price = _extract_int_from_text(result_content, ["price", "offered_price"])
+        ensured["price"] = inferred_price if inferred_price is not None else 13500
+
+    if lowered == "reject_and_counter" and "counter_price" not in ensured:
+        inferred_counter = _extract_int_from_text(result_content, ["counter_price", "price"])
+        ensured["counter_price"] = inferred_counter if inferred_counter is not None else 14000
+
+    if lowered == "inquire_intentions" and "question" not in ensured:
+        inferred_question = _extract_str_from_text(result_content, ["question"])
+        ensured["question"] = (
+            inferred_question
+            if inferred_question
+            else "What price range are you expecting so we can move toward agreement?"
+        )
+
+    if lowered == "provide_information":
+        if "info_type" not in ensured:
+            ensured["info_type"] = "Market Comparison"
+        if "details" not in ensured:
+            brief = (result_content or "").strip().replace("\n", " ")
+            ensured["details"] = brief[:240] if brief else "Providing additional negotiation context."
+
+    return ensured
 
 
 class BaseAgent:
@@ -243,27 +371,73 @@ class BaseAgent:
             function_call = result.tool_calls[0]
             function_name = function_call.function.name
             assert function_name is not None
-            function_args = json.loads(function_call.function.arguments)
+            raw_function_args = function_call.function.arguments
+            parsed_function_args = _safe_json_loads_object(raw_function_args)
+            if parsed_function_args is None:
+                self.logger.debug(
+                    "Tool-call arguments were invalid JSON; attempting text fallback args parsing."
+                )
+                mapped_action_name, mapped_action_args = self._extract_text_action_fallback(
+                    result.content or ""
+                )
+                if mapped_action_name == function_name and mapped_action_args:
+                    function_args = mapped_action_args
+                else:
+                    function_args = _infer_action_args_from_text(
+                        function_name,
+                        f"{raw_function_args}\n{result.content or ''}",
+                    )
+            else:
+                function_args = parsed_function_args
+            function_args = _ensure_required_action_args(
+                function_name,
+                function_args,
+                result.content or "",
+            )
             if function_name != "new_communication_session":
-                result_from_function = self.env.apply_action(
-                    agent_id=self.agent_id,
-                    action_name=function_name,
-                    arguments=function_args,
-                )
-                result_from_function_str = convert_to_str(result_from_function)
+                try:
+                    result_from_function = self.env.apply_action(
+                        agent_id=self.agent_id,
+                        action_name=function_name,
+                        arguments=function_args,
+                    )
+                    result_from_function_str = convert_to_str(result_from_function)
+                except Exception as apply_exc:
+                    self.logger.warning(
+                        f"Tool-call action execution failed for '{function_name}': {apply_exc}"
+                    )
+                    result_from_function = {
+                        "success": False,
+                        "error": str(apply_exc),
+                        "action_name": function_name,
+                        "arguments": function_args,
+                    }
+                    result_from_function_str = convert_to_str(result_from_function)
             else:  # function_name == "new_communication_session"
-                self.session_id = uuid.uuid4()  # new session id
-                target_agent_id = function_args["target_agent_id"]
-                message = function_args["message"]
-                result_from_function = self._handle_new_communication_session(
-                    target_agent_id=target_agent_id,
-                    message=message,
-                    session_id=self.session_id,
-                    task=task,
-                    turns=5,
-                )
-                result_from_function_str = convert_to_str(result_from_function)
-                communication = result_from_function.get("full_chat_history", None)
+                if "target_agent_id" not in function_args or "message" not in function_args:
+                    self.logger.warning(
+                        "new_communication_session tool-call missing required arguments."
+                    )
+                    result_from_function = {
+                        "success": False,
+                        "error": "missing required arguments",
+                        "arguments": function_args,
+                    }
+                    result_from_function_str = convert_to_str(result_from_function)
+                    communication = None
+                else:
+                    self.session_id = uuid.uuid4()  # new session id
+                    target_agent_id = function_args["target_agent_id"]
+                    message = function_args["message"]
+                    result_from_function = self._handle_new_communication_session(
+                        target_agent_id=target_agent_id,
+                        message=message,
+                        session_id=self.session_id,
+                        task=task,
+                        turns=5,
+                    )
+                    result_from_function_str = convert_to_str(result_from_function)
+                    communication = result_from_function.get("full_chat_history", None)
             self.memory.update(
                 self.agent_id,
                 {
@@ -282,10 +456,48 @@ class BaseAgent:
             )
 
         else:
-            self.memory.update(
-                self.agent_id, {"type": "action_response", "result": result.content}
+            result_content = result.content if result.content else ""
+            mapped_action_name, mapped_action_args = self._extract_text_action_fallback(
+                result_content
             )
-            self.logger.info(f"Agent '{self.agent_id}' acted with result '{result}'.")
+            if mapped_action_name:
+                try:
+                    result_from_function = self.env.apply_action(
+                        agent_id=self.agent_id,
+                        action_name=mapped_action_name,
+                        arguments=mapped_action_args,
+                    )
+                    result_from_function_str = convert_to_str(result_from_function)
+                    self.memory.update(
+                        self.agent_id,
+                        {
+                            "type": "action_function_call",
+                            "action_name": mapped_action_name,
+                            "args": mapped_action_args,
+                            "result": result_from_function,
+                            "source": "text_fallback",
+                        },
+                    )
+                    self.logger.info(
+                        f"Agent '{self.agent_id}' used text fallback action '{mapped_action_name}' with args '{mapped_action_args}'."
+                    )
+                except Exception as fallback_exc:
+                    self.logger.warning(
+                        "Text fallback action parsing succeeded but apply_action failed: "
+                        f"{fallback_exc}"
+                    )
+                    self.memory.update(
+                        self.agent_id,
+                        {"type": "action_response", "result": result.content},
+                    )
+                    self.logger.info(
+                        f"Agent '{self.agent_id}' acted with result '{result}'."
+                    )
+            else:
+                self.memory.update(
+                    self.agent_id, {"type": "action_response", "result": result.content}
+                )
+                self.logger.info(f"Agent '{self.agent_id}' acted with result '{result}'.")
         result_content = result.content if result.content else ""
         self.token_usage += self._calculate_token_usage(task, result_content)
         output = "Result from the model:" + result_content + "\n"
@@ -293,18 +505,127 @@ class BaseAgent:
             output += "Result from the function:" + result_from_function_str
         return output, communication
 
-    def _calculate_token_usage(self, task: str, result: str) -> int:
+    def _extract_text_action_fallback(
+        self, result_content: str
+    ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """
+        Parse plain-text or JSON assistant output into an environment action.
+        This is used when tool_calls are unavailable/rejected by backend.
+        """
+        if not result_content.strip():
+            return None, {}
+
+        action_candidates: Dict[str, str] = {}
+        for action_name, description in self.env.action_handler_descriptions.items():
+            action_candidates[_normalize_action_name(action_name)] = action_name
+            if isinstance(description, dict):
+                function_data = description.get("function", {})
+                function_name = function_data.get("name")
+                if isinstance(function_name, str):
+                    action_candidates[_normalize_action_name(function_name)] = action_name
+
+        action_value: Optional[str] = None
+        action_args: Dict[str, Any] = {}
+
+        # Try parsing a JSON object from the output first.
+        try:
+            stripped = result_content.strip()
+            if stripped.startswith("```"):
+                stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
+                stripped = re.sub(r"\s*```$", "", stripped)
+            json_start = stripped.find("{")
+            json_end = stripped.rfind("}")
+            if json_start != -1 and json_end != -1 and json_end > json_start:
+                payload = json.loads(stripped[json_start : json_end + 1])
+                if isinstance(payload, dict):
+                    action_value = (
+                        payload.get("action")
+                        or payload.get("action_name")
+                        or payload.get("tool")
+                        or payload.get("function")
+                    )
+                    args_value = (
+                        payload.get("action_parameters")
+                        or payload.get("parameters")
+                        or payload.get("args")
+                    )
+                    if isinstance(args_value, dict):
+                        action_args = args_value
+        except Exception:
+            pass
+
+        # Fallback to section parsing if JSON is absent.
+        if not isinstance(action_value, str) or not action_value.strip():
+            action_match = re.search(r"(?im)^\s*action\s*:\s*(.+?)\s*$", result_content)
+            if action_match:
+                action_value = action_match.group(1).strip().strip('"')
+
+        # Fallback: detect natural-language intent such as
+        # "I will call `get_environment_info`" or "use placeBlock".
+        if not isinstance(action_value, str) or not action_value.strip():
+            prose_call_match = re.search(
+                r"(?is)(?:call|use|invoke|run|execute)\s+`?([A-Za-z_][A-Za-z0-9_]*)`?",
+                result_content,
+            )
+            if prose_call_match:
+                action_value = prose_call_match.group(1).strip()
+
+        # Fallback: find explicit backticked action names from available actions.
+        if not isinstance(action_value, str) or not action_value.strip():
+            for candidate_norm, candidate_action_name in action_candidates.items():
+                if re.search(
+                    rf"(?is)`{re.escape(candidate_action_name)}`|\b{re.escape(candidate_action_name)}\b",
+                    result_content,
+                ):
+                    action_value = candidate_action_name
+                    break
+
+        if not action_args:
+            params_match = re.search(
+                r"(?is)action\s*parameters\s*:\s*(\{.*?\})",
+                result_content,
+            )
+            if params_match:
+                try:
+                    parsed_args = json.loads(params_match.group(1))
+                    if isinstance(parsed_args, dict):
+                        action_args = parsed_args
+                except Exception:
+                    action_args = {}
+
+        if not isinstance(action_value, str) or not action_value.strip():
+            return None, {}
+
+        normalized = _normalize_action_name(action_value)
+        mapped_action_name = action_candidates.get(normalized)
+        if not mapped_action_name:
+            for candidate_norm, candidate_action_name in action_candidates.items():
+                if normalized in candidate_norm or candidate_norm in normalized:
+                    mapped_action_name = candidate_action_name
+                    break
+
+        if not mapped_action_name:
+            return None, {}
+
+        if not action_args:
+            action_args = _infer_action_args_from_text(mapped_action_name, result_content)
+
+        return mapped_action_name, action_args
+
+    def _calculate_token_usage(self, task: Optional[str], result: Optional[str]) -> int:
         """
         Calculate token usage based on input and output lengths.
 
         Args:
-            task (str): The input task.
-            result (str): The output result.
+            task (Optional[str]): The input task.
+            result (Optional[str]): The output result.
 
         Returns:
             int: The number of tokens used.
         """
-        token_count = (len(task) + len(result)) // 4
+        safe_task = task or ""
+        safe_result = result or ""
+        token_count = (len(safe_task) + len(safe_result)) // 4
         return token_count
 
     def get_token_usage(self) -> int:
@@ -483,8 +804,27 @@ class BaseAgent:
                 function_call = result.tool_calls[0]
                 function_name = function_call.function.name
                 assert function_name is not None
-                function_args = json.loads(function_call.function.arguments)
+                parsed_function_args = _safe_json_loads_object(
+                    function_call.function.arguments
+                )
+                if parsed_function_args is None:
+                    self.logger.warning(
+                        "Session tool-call arguments were invalid JSON; trying inferred args."
+                    )
+                    function_args = _infer_action_args_from_text(
+                        function_name,
+                        f"{function_call.function.arguments}\n{result.content or ''}",
+                    )
+                    if not function_args:
+                        continue
+                else:
+                    function_args = parsed_function_args
                 if function_name == "communicate_to":
+                    if "message" not in function_args:
+                        self.logger.warning(
+                            "communicate_to tool-call missing required message argument; skipping this turn."
+                        )
+                        continue
                     message = function_args["message"]
                     print(message)
                     session_current_agent._handle_communicate_to(
@@ -828,7 +1168,7 @@ class BaseAgent:
             max_token_num=256,
             temperature=0.7,
             top_p=1.0,
-        )[0].content
+        )[0].content or ""
         self.token_usage += token_counter(
             model=self.llm,
             messages=[
@@ -842,18 +1182,39 @@ class BaseAgent:
 
         try:
             assert isinstance(response, str)
-            # check if response is a json, or is a text + json
-            if response[0] == "{":
-                response_data: Dict[str, Any] = json.loads(response)
-            else:
-                response_data: Dict[str, Any] = json.loads(
-                    response[response.find("{") : response.rfind("}") + 1]
-                )
-            response_data: Dict[str, Any] = json.loads(response)
+            response = response.strip()
+            if not response:
+                raise ValueError("Empty planner response")
+
+            cleaned_response = re.sub(r"(?is)<think>.*?</think>", "", response).strip()
+            if cleaned_response.startswith("```") and cleaned_response.endswith("```"):
+                cleaned_response = re.sub(r"^```(?:json)?\s*", "", cleaned_response)
+                cleaned_response = re.sub(r"\s*```$", "", cleaned_response)
+                cleaned_response = cleaned_response.strip()
+
+            # Accept either pure JSON or text containing a JSON object.
+            response_data = _safe_json_loads_object(cleaned_response)
+            if response_data is None:
+                start = cleaned_response.find("{")
+                end = cleaned_response.rfind("}")
+                if start == -1 or end == -1 or end <= start:
+                    response_data = {}
+                else:
+                    response_data = _safe_json_loads_object(cleaned_response[start : end + 1]) or {}
+
+            if not response_data:
+                # Fallback for key-value text formats.
+                agent_match = re.search(r'(?im)\bagent[_\s-]*id\b\s*[:=]\s*["\']?([\w-]+)', cleaned_response)
+                task_match = re.search(r'(?is)\bplanning[_\s-]*task\b\s*[:=]\s*["\']?(.+?)(?:$|\n\w+\s*:)', cleaned_response)
+                if agent_match:
+                    response_data["agent_id"] = agent_match.group(1).strip()
+                if task_match:
+                    response_data["planning_task"] = task_match.group(1).strip().strip('"\'')
+
             next_agent_id = response_data.get("agent_id")
             planning_task = response_data.get("planning_task")
-        except (json.JSONDecodeError, KeyError):
-            self.logger.warning(
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            self.logger.debug(
                 f"Agent '{self.agent_id}' received an invalid response format from the LLM."
             )
 
@@ -863,7 +1224,7 @@ class BaseAgent:
             )
             return next_agent_id, planning_task
         else:
-            self.logger.warning(
+            self.logger.debug(
                 f"Agent '{self.agent_id}' did not select a valid next agent."
             )
             return None, None

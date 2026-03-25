@@ -54,6 +54,64 @@ def extract_existing_evaluations(out_obj: Optional[Dict[str, Any]]) -> Dict[str,
     return extracted
 
 
+def extract_werewolf_evaluations(repo_root: Path, run_log_path: Path) -> Dict[str, Any]:
+    """Extract werewolf evaluation payload from run log linked result.json artifacts."""
+    if not run_log_path.exists() or not run_log_path.is_file():
+        return {}
+
+    game_data_rel_paths: List[str] = []
+    pattern = re.compile(r"Game data stored in:\s*(werewolf_log/\S+)")
+    try:
+        with run_log_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    game_data_rel_paths.append(match.group(1).strip())
+    except OSError:
+        return {}
+
+    if not game_data_rel_paths:
+        return {}
+
+    game_rel = game_data_rel_paths[-1]
+    game_root = repo_root / game_rel
+    parent = game_root.parent
+    prefix = game_root.name
+
+    candidates: List[Path] = []
+    if game_root.exists() and game_root.is_dir():
+        candidates.append(game_root)
+    if parent.exists() and parent.is_dir():
+        for p in sorted(parent.glob(f"{prefix}*")):
+            if p.is_dir() and p not in candidates:
+                candidates.append(p)
+
+    for folder in candidates:
+        result_json = folder / "result.json"
+        if not result_json.exists() or not result_json.is_file():
+            continue
+        try:
+            with result_json.open("r", encoding="utf-8") as f:
+                obj = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        if not isinstance(obj, dict):
+            continue
+
+        return {
+            "werewolf_result": {
+                "game_result": obj.get("game_result"),
+                "result_score": obj.get("result_score"),
+                "process_scores": obj.get("process_scores"),
+                "surviving_players": obj.get("surviving_players"),
+                "result_file": str(result_json.relative_to(repo_root).as_posix()),
+            }
+        }
+
+    return {}
+
+
 def evaluate_task_record(repo_root: Path, task: Dict[str, Any]) -> Dict[str, Any]:
     """Collect one task record using run metadata and produced JSONL output."""
     output_rel = task.get("expected_output_file")
@@ -68,6 +126,8 @@ def evaluate_task_record(repo_root: Path, task: Dict[str, Any]) -> Dict[str, Any
 
     out_obj = read_jsonl_last(output_path) if output_path else None
     existing_eval = extract_existing_evaluations(out_obj)
+    if scenario == "werewolf" and run_log_path is not None:
+        existing_eval.update(extract_werewolf_evaluations(repo_root, run_log_path))
 
     return {
         "scenario": scenario,

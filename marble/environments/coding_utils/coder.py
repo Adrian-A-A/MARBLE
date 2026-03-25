@@ -1,14 +1,31 @@
 import os
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ruamel.yaml import YAML
 
 from marble.llms.model_prompting import model_prompting
 
 
+def _resolve_model_name(env: Any, model_name: Optional[str]) -> str:
+    """Resolve model name from explicit arg, then environment config, then fallback."""
+    if model_name and model_name.strip():
+        return model_name
+
+    env_config = getattr(env, "config", {})
+    if isinstance(env_config, dict):
+        configured_model = env_config.get("llm")
+        if isinstance(configured_model, str) and configured_model.strip():
+            return configured_model
+
+    return "gpt-3.5-turbo"
+
+
 def create_solution_handler(
-    env, task_description: str, model_name: str, file_path: str = "solution.py"
+    env,
+    task_description: str,
+    model_name: Optional[str] = None,
+    file_path: str = "solution.py",
 ) -> Dict[str, Any]:
     """
     Creates solution.py file and generates content based on task description.
@@ -72,7 +89,7 @@ def create_solution_handler(
         user_prompt = "Please write the complete Python code for this task."
 
         response = model_prompting(
-            model_name,
+            _resolve_model_name(env, model_name),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -224,11 +241,10 @@ def register_coder_actions(env):
                         },
                         "model_name": {
                             "type": "string",
-                            "description": "Name of the LLM model to use",
-                            "default": "gpt-3.5-turbo",
+                            "description": "Name of the LLM model to use (optional; defaults to environment llm)",
                         },
                     },
-                    "required": ["task_description", "model_name"],
+                    "required": ["task_description"],
                     "additionalProperties": False,
                 },
             },

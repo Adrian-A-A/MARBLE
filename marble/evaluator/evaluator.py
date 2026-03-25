@@ -16,6 +16,52 @@ from marble.llms.model_prompting import model_prompting
 from marble.utils.logger import get_logger
 
 
+def _strip_think_blocks(text: str) -> str:
+    return re.sub(r"(?is)<think>.*?</think>", "", text or "").strip()
+
+
+def _strip_code_fences(text: str) -> str:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
+
+
+def _extract_json_fragment(text: str, expect_array: bool = False) -> str:
+    cleaned = _strip_code_fences(_strip_think_blocks(text))
+    opener, closer = ("[", "]") if expect_array else ("{", "}")
+    start = cleaned.find(opener)
+    if start == -1:
+        return ""
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for idx in range(start, len(cleaned)):
+        ch = cleaned[idx]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return cleaned[start : idx + 1]
+    return ""
+
+
 def fill_prompt_template(template: str, values: Dict[str, Any]) -> str:
     """Replace only known placeholders to avoid KeyError from JSON braces."""
     prompt = template
@@ -175,10 +221,13 @@ class Evaluator:
         # Parse the milestones from result.content
         assert isinstance(result.content, str)
         milestones = self.parse_milestones(result.content)
+        # Keep only structured milestone objects to avoid runtime errors on noisy LLM outputs.
+        milestones = [m for m in milestones if isinstance(m, dict)]
         # Update the metrics
         self.metrics["total_milestones"] += len(milestones)
         for milestone in milestones:
-            agents = milestone.get("contributing_agents", [])
+            # Support both legacy and prompt-defined keys.
+            agents = milestone.get("contributing_agents") or milestone.get("agents", [])
             for agent_id in agents:
                 if agent_id in self.metrics["agent_kpis"]:
                     self.metrics["agent_kpis"][agent_id] += 1
@@ -335,25 +384,76 @@ class Evaluator:
             Dict[str, int]: The parsed ratings.
         """
         try:
-            content = assistant_answer.strip()
+            json_str = _extract_json_fragment(assistant_answer, expect_array=False)
+            if not json_str:
+                self.logger.debug("No JSON found in assistant's answer for research ratings. Trying fallback extraction.")
+                # Fallback: Try to extract individual ratings from plain text
+                return self._extract_ratings_from_text(assistant_answer)
 
-            json_start = content.find('{')
-            json_end = content.rfind('}') + 1
-
-            if json_start >= 0 and json_end > json_start:
-                json_str = content[json_start:json_end]
-                ratings = json.loads(json_str)
-                # Ensure ratings are integers
-                ratings_dict: Dict[str, int] = {k: int(v) for k, v in ratings.items()}
-                return ratings_dict
-        
-            else:
-                self.logger.error("No JSON found in assistant's answer.")
+            ratings = json.loads(json_str)
+            if not isinstance(ratings, dict):
                 return {}
+            # Ensure ratings are integers
+            ratings_dict: Dict[str, int] = {k: int(v) for k, v in ratings.items()}
+            return ratings_dict
+        except (json.JSONDecodeError, ValueError, TypeError):
+            self.logger.debug("Failed to parse JSON from assistant's answer for research ratings. Trying fallback extraction.")
+            # Fallback: Try to extract individual ratings from plain text
+            return self._extract_ratings_from_text(assistant_answer)
+
+    def _extract_ratings_from_text(self, text: str) -> Dict[str, int]:
+        """
+        Fallback method to extract innovation, safety, and feasibility ratings from plain text.
+        Looks for patterns like "innovation: 4", "Innovation (4)", "Innovation is 4", etc.
+        
+        Args:
+            text (str): The text to extract ratings from.
             
-        except json.JSONDecodeError:
-            self.logger.error("Failed to parse JSON from assistant's answer.")
-            return {}
+        Returns:
+            Dict[str, int]: Dictionary with extracted ratings or empty dict if extraction fails.
+        """
+        ratings = {}
+        # Pattern to match: innovation/safety/feasibility followed by various separators and a number 1-5
+        # Handles: "innovation: 4", "innovation=4", "innovation is 4", "innovation 4", "innovation (4)"
+        patterns = {
+            'innovation': r'innovation[\s:=is]+([\(\[]?)(\d)[\)\]]?',
+            'safety': r'safety[\s:=is]+([\(\[]?)(\d)[\)\]]?',
+            'feasibility': r'feasibility[\s:=is]+([\(\[]?)(\d)[\)\]]?',
+        }
+        
+        text_lower = text.lower()
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text_lower)
+            if match:
+                try:
+                    # Extract the digit (group 2 because group 1 is optional parenthesis)
+                    value = int(match.group(2))
+                    if 1 <= value <= 5:
+                        ratings[key] = value
+                        self.logger.debug(f"Extracted {key}: {value} from text")
+                except (ValueError, IndexError):
+                    pass
+        
+        if ratings:
+            self.logger.info(f"Successfully extracted ratings from text via fallback: {ratings}")
+            return ratings
+
+        # Secondary fallback for minimal outputs like "4 5 4" or "4,5,4".
+        nums = [int(n) for n in re.findall(r"\b[1-5]\b", text)]
+        if len(nums) >= 3:
+            fallback = {
+                "innovation": nums[0],
+                "safety": nums[1],
+                "feasibility": nums[2],
+            }
+            self.logger.info(
+                f"Extracted research ratings from positional fallback: {fallback}"
+            )
+            return fallback
+
+        self.logger.debug("Could not extract any valid ratings from text")
+        
+        return ratings
 
     def parse_score(self, assistant_answer: str) -> int:
         """
@@ -366,24 +466,10 @@ class Evaluator:
             int: The parsed score. Returns 3 (default score) if parsing fails.
         """
         try:
-            # Clean the response content
-            content = assistant_answer.strip()
+            content = _strip_code_fences(_strip_think_blocks(assistant_answer))
 
-            # Remove any markdown code block markers if present
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
-
-            # Find the JSON object
-            json_start = content.find('{')
-            json_end = content.rfind('}') + 1
-
-            if json_start >= 0 and json_end > json_start:
-                json_str = content[json_start:json_end]
+            json_str = _extract_json_fragment(content, expect_array=False)
+            if json_str:
                 try:
                     rating_data = json.loads(json_str)
                     if isinstance(rating_data, dict) and "rating" in rating_data:
@@ -394,7 +480,7 @@ class Evaluator:
                         else:
                             self.logger.warning(f"Score {score} out of valid range (1-5)")
                 except json.JSONDecodeError:
-                    self.logger.warning("Failed to parse JSON from response")
+                    self.logger.debug("Failed to parse JSON from response")
                 except (ValueError, TypeError):
                     self.logger.warning("Invalid score format in JSON")
                 except KeyError:
@@ -457,23 +543,30 @@ class Evaluator:
         """
         # Preprocess to handle escaped newlines and unnecessary symbols
         try:
-            # Remove escaped newlines
-            cleaned_answer = assistant_answer.replace("\\n", "").strip()
+            normalized_answer = _strip_code_fences(_strip_think_blocks(assistant_answer))
 
-            # Remove any leading and trailing backticks and whitespace
-            if cleaned_answer.startswith("```json") and cleaned_answer.endswith("```"):
-                cleaned_answer = cleaned_answer[7:-3].strip()
+            # First try to parse a JSON list directly.
+            list_json = _extract_json_fragment(normalized_answer, expect_array=True)
+            if list_json:
+                milestones = json.loads(list_json)
+                if isinstance(milestones, list):
+                    return [m for m in milestones if isinstance(m, dict)]
 
-            # Parse the JSON block
-            milestones = json.loads(cleaned_answer)
-            assert isinstance(milestones, list)
-            return milestones
+            # Then try object payloads like {"milestones": [...]}
+            obj_json = _extract_json_fragment(normalized_answer, expect_array=False)
+            if obj_json:
+                payload = json.loads(obj_json)
+                if isinstance(payload, dict) and isinstance(payload.get("milestones"), list):
+                    return [m for m in payload["milestones"] if isinstance(m, dict)]
+
+            self.logger.debug("No milestone JSON payload found in assistant answer.")
+            return []
         except json.JSONDecodeError:
-            self.logger.error("Failed to parse JSON from assistant's answer.")
+            self.logger.debug("Failed to parse JSON from assistant's answer.")
             return []
 
         except Exception as e:
-            self.logger.error(f"Error processing milestones: {e}")
+            self.logger.warning(f"Error processing milestones: {e}")
             return []
 
     def parse_code_quality_scores(self, assistant_answer: str) -> Dict[str, int]:

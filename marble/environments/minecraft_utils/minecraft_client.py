@@ -53,6 +53,45 @@ class MinecraftClient:
             url_prefix = {}
         return url_prefix
 
+    @staticmethod
+    def _post_json_with_retry(
+        url: str,
+        data: dict | None = None,
+        retries: int = 3,
+        timeout_sec: int = 10,
+        retry_wait_sec: float = 1.0,
+    ) -> dict:
+        """Send POST request and always return a JSON-like dict, retrying transient startup errors."""
+        last_error = "unknown error"
+        payload = json.dumps(data) if data is not None else None
+
+        for attempt in range(max(retries, 1)):
+            try:
+                response = requests.post(
+                    url,
+                    data=payload,
+                    headers=MinecraftClient.headers,
+                    timeout=timeout_sec,
+                )
+                response.raise_for_status()
+                if not response.text.strip():
+                    raise ValueError("empty response body")
+                parsed = response.json()
+                if isinstance(parsed, dict):
+                    return parsed
+                return {"status": False, "error": "non-dict response", "message": parsed}
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+                if attempt < max(retries, 1) - 1:
+                    time.sleep(retry_wait_sec)
+
+        return {
+            "status": False,
+            "error": f"request failed after {max(retries, 1)} attempts: {last_error}",
+            "message": "",
+            "url": url,
+        }
+
     def __init__(self, name, local_port=5000):
         self.name = name
         self.local_port = local_port
@@ -152,8 +191,7 @@ class MinecraftClient:
     def env(self):
         """Get the Environment Information"""
         url = MinecraftClient.get_url_prefix()[self.name] + "/post_environment"
-        response = requests.post(url, headers=MinecraftClient.headers)
-        return str(response.json())
+        return str(MinecraftClient._post_json_with_retry(url, retries=5))
 
     @staticmethod
     def _wait_for_agent_server(
@@ -499,18 +537,54 @@ class MinecraftClient:
         return response.json()
 
     @staticmethod
+    def get_status(player_name: str):
+        """Get lightweight agent readiness status for launch-time checks."""
+        url = MinecraftClient.get_url_prefix()[player_name] + "/post_status"
+        for _ in range(8):
+            result = MinecraftClient._post_json_with_retry(url, retries=2)
+            if isinstance(result, dict) and bool(result.get("status")):
+                return result
+
+            # Keep polling while the bot is still starting up.
+            if (
+                isinstance(result, dict)
+                and result.get("status") is False
+                and result.get("error") in {"bot_entity_unavailable", None}
+            ):
+                time.sleep(1.0)
+                continue
+            return result
+        return result
+
+    @staticmethod
     def get_environment_info(player_name: str):
         """Get the Environment Information, return string contains time of day, weather"""
         url = MinecraftClient.get_url_prefix()[player_name] + "/post_environment"
-        response = requests.post(url, headers=MinecraftClient.headers)
-        return response.json()
+        for _ in range(5):
+            result = MinecraftClient._post_json_with_retry(url, retries=2, timeout_sec=25)
+            if not (
+                isinstance(result, dict)
+                and result.get("status") is False
+                and result.get("error") == "bot_entity_unavailable"
+            ):
+                return result
+            time.sleep(1.0)
+        return result
 
     @staticmethod
     def get_environment_dict_info(player_name: str):
         """Get the Environment Information, return string contains time of day, weather"""
         url = MinecraftClient.get_url_prefix()[player_name] + "/post_environment_dict"
-        response = requests.post(url, headers=MinecraftClient.headers)
-        return response.json()
+        for _ in range(5):
+            result = MinecraftClient._post_json_with_retry(url, retries=2, timeout_sec=25)
+            if not (
+                isinstance(result, dict)
+                and result.get("status") is False
+                and result.get("error") == "bot_entity_unavailable"
+            ):
+                return result
+            time.sleep(1.0)
+        return result
 
     @staticmethod
     def get_entity_info(player_name: str, target_name: str = ""):

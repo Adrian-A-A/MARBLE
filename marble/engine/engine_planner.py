@@ -6,6 +6,7 @@ Engine Planner module responsible for task assignment and scheduling.
 
 import json
 import re
+import ast
 from typing import Any, Dict, List
 
 from litellm import token_counter
@@ -14,6 +15,10 @@ from litellm.types.utils import Message
 from marble.graph.agent_graph import AgentGraph
 from marble.llms.model_prompting import model_prompting
 from marble.utils.logger import get_logger
+
+
+def _strip_think_blocks(text: str) -> str:
+    return re.sub(r"(?is)<think>.*?</think>", "", text).strip()
 
 
 def json_parse(input_str: str) -> Dict[str, Any]:
@@ -46,28 +51,43 @@ def json_parse(input_str: str) -> Dict[str, Any]:
     if not input_str or not input_str.strip():
         raise ValueError("JSON parsing failed. Empty response.")
 
-    # Regular expression to match the content between ```json and ```
-    pattern = r"```json\s*(\{.*?\})\s*```"
-    match = re.search(pattern, input_str, re.DOTALL)
+    cleaned = _strip_think_blocks(input_str)
 
-    if match:
-        json_str = match.group(1)
-    else:
-        # If no code block is found, try to extract a JSON substring by looking for the first '{' and the last '}'
-        start = input_str.find("{")
-        end = input_str.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            json_str = input_str[start : end + 1]
-        else:
-            # Fallback: use the entire string as JSON
-            json_str = input_str
+    candidates: List[str] = []
 
-    try:
-        data = json.loads(json_str)
-    except json.JSONDecodeError as e:
-        raise ValueError("JSON parsing failed. Please check the input format.") from e
+    # Try fenced code blocks first.
+    fence_matches = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+    for block in fence_matches:
+        block = block.strip()
+        if block:
+            candidates.append(block)
 
-    return data
+    # Also try extracting a JSON object span from the full text.
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(cleaned[start : end + 1])
+
+    # Last-resort candidate.
+    candidates.append(cleaned)
+
+    for json_str in candidates:
+        try:
+            data = json.loads(json_str)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+        # Tolerate python-like dicts with single quotes/True/False/None.
+        try:
+            data = ast.literal_eval(json_str)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+
+    raise ValueError("JSON parsing failed. Please check the input format.")
 
 
 class EnginePlanner:
@@ -496,5 +516,9 @@ class EnginePlanner:
             self.logger.debug(f"Received continuation decision: {decision}")
             return decision.get("continue", False)
         except ValueError as e:
-            self.logger.error(f"Failed to parse JSON decision response: {e}")
+            raw_text = (response[0].content or "").lower()
+            cont_match = re.search(r'"?continue"?\s*[:=]\s*(true|false)', raw_text)
+            if cont_match:
+                return cont_match.group(1) == "true"
+            self.logger.debug(f"Failed to parse JSON decision response: {e}")
             return True

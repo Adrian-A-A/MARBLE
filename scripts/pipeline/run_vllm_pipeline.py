@@ -133,7 +133,77 @@ def detect_node_major_version(node_binary: str = "node") -> Tuple[Optional[int],
     return int(match.group(1)), raw
 
 
-SUPPORTED_ENGINE_ENV_TYPES = {
+def detect_docker_daemon_reachable() -> Tuple[bool, str]:
+    """Return whether docker daemon is reachable and a short diagnostic message."""
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        return False, "docker_not_found"
+
+    probes = [
+        ["docker", "ps"],
+        ["sudo", "-n", "docker", "ps"],
+    ]
+    last_msg = "unknown"
+    for cmd in probes:
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return True, f"ok via {' '.join(cmd)}"
+            stderr = (result.stderr or "").strip()
+            stdout = (result.stdout or "").strip()
+            last_msg = stderr or stdout or f"exit_{result.returncode}"
+        except Exception as exc:  # noqa: BLE001
+            last_msg = str(exc)
+
+    return False, last_msg
+
+
+def resolve_executable(binary: str, python_bin: str) -> Optional[str]:
+    """Resolve an executable from PATH or from the selected Python's bin directory."""
+    if os.path.sep in binary or (os.path.altsep and os.path.altsep in binary):
+        return binary if Path(binary).exists() else None
+
+    path_hit = shutil.which(binary)
+    if path_hit:
+        return path_hit
+
+    py_path = Path(python_bin).resolve()
+    sibling = py_path.parent / binary
+    if sibling.exists() and os.access(sibling, os.X_OK):
+        return str(sibling)
+
+    return None
+
+
+def resolve_vllm_launcher(binary: str, python_bin: str) -> Optional[List[str]]:
+    """Resolve vLLM launcher command as either an executable or python -m fallback."""
+    resolved_binary = resolve_executable(binary, python_bin)
+    if resolved_binary:
+        return [resolved_binary]
+
+    try:
+        probe = subprocess.run(
+            [python_bin, "-c", "import vllm.entrypoints.cli.main"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if probe.returncode == 0:
+            return [python_bin, "-m", "vllm.entrypoints.cli.main"]
+    except Exception:
+        return None
+
+    return None
+
+
+SUPPORTED_PIPELINE_ENV_TYPES = {
     "web",
     "base",
     "research",
@@ -141,6 +211,7 @@ SUPPORTED_ENGINE_ENV_TYPES = {
     "worldsimulation",
     "minecraft",
     "db",
+    "werewolf",
 }
 
 
@@ -153,6 +224,20 @@ class RunTask:
     source_config: Path
     temp_config: Path
     output_dir: Path
+    werewolf_games: int = 1
+    werewolf_day_night_limit: Optional[int] = None
+    max_iterations: Optional[int] = None
+
+
+def parse_positive_int(value: Any, *, default: int) -> int:
+    """Parse a positive integer from manifest values with a safe default."""
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 @dataclass
@@ -233,10 +318,10 @@ def build_tasks(
             if env_type is None:
                 filtered_configs.append(cfg_path)
                 continue
-            if env_type.strip().lower() not in SUPPORTED_ENGINE_ENV_TYPES:
+            if env_type.strip().lower() not in SUPPORTED_PIPELINE_ENV_TYPES:
                 print(
                     f"[WARN] Skipping config '{cfg_path.relative_to(repo_root)}' "
-                    f"because environment type '{env_type}' is unsupported by marble.main."
+                    f"because environment type '{env_type}' is unsupported by this pipeline runner."
                 )
                 continue
             filtered_configs.append(cfg_path)
@@ -258,6 +343,35 @@ def build_tasks(
             )
 
         model_keys = scenario_cfg.get("model_keys") or global_model_keys
+        werewolf_cfg_global = global_section.get("werewolf") or {}
+        if not isinstance(werewolf_cfg_global, dict):
+            werewolf_cfg_global = {}
+        werewolf_cfg_scenario = scenario_cfg.get("werewolf") or {}
+        if not isinstance(werewolf_cfg_scenario, dict):
+            werewolf_cfg_scenario = {}
+
+        max_iterations_raw = scenario_cfg.get(
+            "max_iterations", global_section.get("max_iterations")
+        )
+        max_iterations = parse_positive_int(max_iterations_raw, default=0)
+        if max_iterations <= 0:
+            max_iterations = None
+
+        werewolf_games = parse_positive_int(
+            werewolf_cfg_scenario.get("games", werewolf_cfg_global.get("games")),
+            default=1,
+        )
+        werewolf_day_night_limit_raw = werewolf_cfg_scenario.get(
+            "day_night_limit",
+            werewolf_cfg_global.get("day_night_limit"),
+        )
+        werewolf_day_night_limit = parse_positive_int(
+            werewolf_day_night_limit_raw,
+            default=0,
+        )
+        if werewolf_day_night_limit <= 0:
+            werewolf_day_night_limit = None
+
         orchestration_key = (
             scenario_cfg.get("orchestration_key")
             or global_section.get("orchestration_key")
@@ -282,6 +396,7 @@ def build_tasks(
                 for cfg_path in configs:
                     rel_cfg = cfg_path.relative_to(repo_root)
                     cfg_slug = safe_slug(str(rel_cfg.with_suffix("")))
+                    env_type = (get_environment_type_from_config(cfg_path) or "").strip().lower()
 
                     if mode_slug:
                         temp_config = temp_root / scenario_name / model_slug / mode_slug / f"{cfg_slug}.yaml"
@@ -299,6 +414,11 @@ def build_tasks(
                             source_config=cfg_path,
                             temp_config=temp_config,
                             output_dir=output_dir,
+                            werewolf_games=werewolf_games if env_type == "werewolf" else 1,
+                            werewolf_day_night_limit=(
+                                werewolf_day_night_limit if env_type == "werewolf" else None
+                            ),
+                            max_iterations=max_iterations,
                         )
                     )
 
@@ -330,6 +450,16 @@ def write_temp_config(
 
     if task.orchestration_mode:
         deep_set_key(updated, task.orchestration_key, task.orchestration_mode)
+
+    if task.werewolf_day_night_limit is not None:
+        updated["rounds"] = int(task.werewolf_day_night_limit)
+
+    if task.max_iterations is not None:
+        environment = updated.get("environment")
+        if not isinstance(environment, dict):
+            environment = {}
+            updated["environment"] = environment
+        environment["max_iterations"] = int(task.max_iterations)
 
     expected_output_file: Optional[Path] = None
     output = updated.get("output")
@@ -386,6 +516,220 @@ def strip_openai_prefix(model: str) -> str:
     if model.startswith("openai/"):
         return model[len("openai/") :]
     return model
+
+
+def _contains_any(model_id: str, needles: Sequence[str]) -> bool:
+    lowered = model_id.lower()
+    return any(needle in lowered for needle in needles)
+
+
+def _first_nonempty_env(keys: Sequence[str]) -> str:
+    for key in keys:
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _mapped_parsers_for_model(model_id: str) -> Optional[Dict[str, Any]]:
+    """Return explicit parser mapping for known models; None means fallback heuristics."""
+    raw_model = strip_openai_prefix(model_id).lower()
+
+    # Qwen 3.5 family and Qwen2.5-72B-Instruct share the same parser setup.
+    if _contains_any(
+        raw_model,
+        [
+            "qwen3.5-4b",
+            "qwen3.5-9b",
+            "qwen3.5-27b",
+            "qwen3.5-35b-a3b",
+            "qwen2.5-72b-instruct",
+        ],
+    ):
+        return {
+            "reasoning_parser": "qwen3",
+            "enable_auto_tool_choice": True,
+            "tool_call_parser": "qwen3_coder",
+        }
+
+    if "falcon-h1r-7b-fp8" in raw_model:
+        return {
+            "reasoning_parser": "deepseek_r1",
+            # Tool parser is optional per model notes; keep unset by default.
+            "enable_auto_tool_choice": None,
+            "tool_call_parser": None,
+        }
+
+    if "ministral-3-8b-reason" in raw_model:
+        return {
+            "reasoning_parser": "mistral",
+            "enable_auto_tool_choice": True,
+            "tool_call_parser": "mistral",
+        }
+
+    if "nvidia-nemotron-nano-9b-v2" in raw_model:
+        return {
+            # Template-based reasoning; no --reasoning-parser required.
+            "reasoning_parser": None,
+            "enable_auto_tool_choice": True,
+            "tool_call_parser": "nemotron_json",
+            "tool_parser_plugin_env": [
+                "MARBLE_VLLM_NEMOTRON_TOOL_PARSER_PLUGIN",
+                "MARBLE_VLLM_TOOL_PARSER_PLUGIN",
+                "VLLM_TOOL_PARSER_PLUGIN",
+            ],
+        }
+
+    if "nvidia-nemotron-3-nano-30b" in raw_model:
+        return {
+            "reasoning_parser": "nano_v3",
+            "enable_auto_tool_choice": True,
+            "tool_call_parser": "qwen3_coder",
+            "reasoning_parser_plugin_env": [
+                "MARBLE_VLLM_NEMOTRON_REASONING_PARSER_PLUGIN",
+                "MARBLE_VLLM_REASONING_PARSER_PLUGIN",
+                "VLLM_REASONING_PARSER_PLUGIN",
+            ],
+        }
+
+    if "nvidia-nemotron-3-super-120b" in raw_model:
+        return {
+            # Template-based reasoning in published examples; no parser flag by default.
+            "reasoning_parser": None,
+            "enable_auto_tool_choice": True,
+            "tool_call_parser": "qwen3_coder",
+        }
+
+    if _contains_any(
+        raw_model,
+        [
+            "deepseek-r1-distill-qwen-32b",
+            "deepseek-r1-distill-llama-70b",
+        ],
+    ):
+        return {
+            "reasoning_parser": "deepseek_r1",
+            # No official tool parser mapping; leave unset by default.
+            "enable_auto_tool_choice": None,
+            "tool_call_parser": None,
+        }
+
+    if "llama-3.3-70b-instruct" in raw_model:
+        return {
+            "reasoning_parser": None,
+            "enable_auto_tool_choice": None,
+            "tool_call_parser": None,
+        }
+
+    if _contains_any(raw_model, ["gpt-oss-20b", "gpt-oss-120b"]):
+        return {
+            "reasoning_parser": "openai",
+            "enable_auto_tool_choice": True,
+            "tool_call_parser": "openai",
+        }
+
+    return None
+
+
+def _fallback_tool_parser_for_model(model_id: str) -> str:
+    """Fallback tool-call parser heuristic for models not in explicit mapping."""
+    lowered = model_id.lower()
+    if "qwen" in lowered:
+        if "coder" in lowered:
+            return "qwen3_coder"
+        return "qwen3_xml"
+    if "llama" in lowered:
+        return "llama3_json"
+    if "mistral" in lowered:
+        return "mistral"
+    return "hermes"
+
+
+def _has_flag(extra_args: str, flag: str) -> bool:
+    try:
+        parsed = shlex.split(extra_args)
+    except Exception:
+        parsed = extra_args.split()
+    return flag in parsed
+
+
+def _augment_vllm_args_for_parsers(model_id: str, extra_args: str) -> str:
+    """
+    Add model-aligned reasoning/tool parser flags unless user already supplied
+    equivalent flags in extra args.
+    """
+    args = extra_args or ""
+    mapped = _mapped_parsers_for_model(model_id)
+
+    if mapped is not None:
+        reasoning_plugin_env = mapped.get("reasoning_parser_plugin_env") or []
+        if reasoning_plugin_env and not _has_flag(args, "--reasoning-parser-plugin"):
+            plugin_path = _first_nonempty_env(reasoning_plugin_env)
+            if plugin_path:
+                args = (args + f" --reasoning-parser-plugin {plugin_path}").strip()
+
+        tool_plugin_env = mapped.get("tool_parser_plugin_env") or []
+        if tool_plugin_env and not _has_flag(args, "--tool-parser-plugin"):
+            plugin_path = _first_nonempty_env(tool_plugin_env)
+            if plugin_path:
+                args = (args + f" --tool-parser-plugin {plugin_path}").strip()
+
+        reasoning_parser = mapped.get("reasoning_parser")
+        if reasoning_parser and not _has_flag(args, "--reasoning-parser"):
+            args = (args + f" --reasoning-parser {reasoning_parser}").strip()
+
+        enable_tools = mapped.get("enable_auto_tool_choice")
+        if enable_tools and not _has_flag(args, "--enable-auto-tool-choice"):
+            args = (args + " --enable-auto-tool-choice").strip()
+
+        tool_parser = mapped.get("tool_call_parser")
+        if tool_parser and not _has_flag(args, "--tool-call-parser"):
+            args = (args + f" --tool-call-parser {tool_parser}").strip()
+
+        return args
+
+    # Backward-compatible defaults for any model not explicitly mapped above.
+    if not _has_flag(args, "--enable-auto-tool-choice"):
+        args = (args + " --enable-auto-tool-choice").strip()
+
+    if not _has_flag(args, "--tool-call-parser"):
+        parser_name = _fallback_tool_parser_for_model(model_id)
+        args = (args + f" --tool-call-parser {parser_name}").strip()
+
+    return args
+
+
+def resolve_model_override_extra_args(manifest: Dict[str, Any], model_name: str) -> str:
+    """Resolve per-model vLLM extra args from manifest overrides."""
+    overrides = manifest.get("vllm_model_overrides") or {}
+    if not isinstance(overrides, dict):
+        return ""
+
+    # Allow both keys: openai/<repo_id> and raw <repo_id>.
+    candidates = [model_name]
+    raw_model = strip_openai_prefix(model_name)
+    if raw_model != model_name:
+        candidates.append(raw_model)
+    else:
+        candidates.append(f"openai/{model_name}")
+
+    for key in candidates:
+        cfg = overrides.get(key)
+        if isinstance(cfg, dict):
+            extra = cfg.get("extra_args")
+            if isinstance(extra, str) and extra.strip():
+                return extra.strip()
+    return ""
+
+
+def merge_vllm_extra_args(base_args: str, model_override_args: str) -> str:
+    """Merge CLI/global args with per-model override args (override appended last)."""
+    parts = []
+    if base_args and base_args.strip():
+        parts.append(base_args.strip())
+    if model_override_args and model_override_args.strip():
+        parts.append(model_override_args.strip())
+    return " ".join(parts)
 
 
 def wait_for_vllm_ready(api_base: str, api_key: str, timeout_sec: int) -> None:
@@ -455,10 +799,17 @@ def wait_for_vllm_chat_ready(
     )
 
 
-def build_vllm_serve_command(model: str, opts: VLLMServerOptions) -> List[str]:
+def build_vllm_serve_command(
+    model: str,
+    opts: VLLMServerOptions,
+    launcher: Sequence[str],
+    extra_args: str,
+) -> List[str]:
     """Build `vllm serve` command for one model."""
+    effective_extra_args = _augment_vllm_args_for_parsers(model, extra_args)
+
     command = [
-        opts.binary,
+        *launcher,
         "serve",
         model,
         "--host",
@@ -472,8 +823,8 @@ def build_vllm_serve_command(model: str, opts: VLLMServerOptions) -> List[str]:
         command.append("--trust-remote-code")
     if opts.api_key:
         command.extend(["--api-key", opts.api_key])
-    if opts.extra_args:
-        command.extend(shlex.split(opts.extra_args))
+    if effective_extra_args:
+        command.extend(shlex.split(effective_extra_args))
     return command
 
 
@@ -541,10 +892,24 @@ def run_task(
     dry_run: bool,
 ) -> int:
     """Execute one run task and return the process exit code."""
+    env_type = (get_environment_type_from_config(task.temp_config) or "").strip().lower()
     main_path = Path(main_script)
     default_main = (repo_root / "marble" / "main.py").resolve()
     run_cwd = repo_root
-    if main_path.resolve() == default_main:
+
+    if env_type == "werewolf":
+        command = [
+            python_bin,
+            "-m",
+            "marble.environments.werewolf_env",
+            "--rounds",
+            str(task.werewolf_games),
+            "--name",
+            f"pipeline_{task.scenario}_{safe_slug(task.model)}",
+            "--config_path",
+            str(task.temp_config),
+        ]
+    elif main_path.resolve() == default_main:
         command = [python_bin, "-m", "marble.main", "--config_path", str(task.temp_config)]
     else:
         command = [python_bin, main_script, "--config_path", str(task.temp_config)]
@@ -793,6 +1158,16 @@ def main() -> int:
         clear_hf_cache_after_model=args.clear_hf_cache_after_model,
     )
 
+    vllm_launcher: Optional[List[str]] = None
+    if vllm_opts.enabled:
+        vllm_launcher = resolve_vllm_launcher(vllm_opts.binary, args.python_bin)
+        if not vllm_launcher:
+            raise FileNotFoundError(
+                f"Could not find vLLM executable '{vllm_opts.binary}'. "
+                f"Install vllm in the selected environment ({args.python_bin}) "
+                "or pass --vllm-binary with an absolute path."
+            )
+
     main_script = str((repo_root / (global_cfg.get("main_script") or "marble/main.py")).resolve())
 
     print("[PIPELINE]")
@@ -860,6 +1235,18 @@ def main() -> int:
                     f"{required_node_major} is required, but found {node_raw} at {node_path}."
                 )
 
+        requires_docker_daemon = bool(scenario_cfg.get("required_docker_daemon"))
+        if requires_docker_daemon:
+            docker_ok, docker_msg = detect_docker_daemon_reachable()
+            if not docker_ok:
+                scenario_skip_reasons[scenario_name] = (
+                    "docker_daemon_unavailable: " + docker_msg
+                )
+                print(
+                    f"[WARN] Scenario '{scenario_name}' will be skipped because docker daemon "
+                    f"is unreachable ({docker_msg})."
+                )
+
     for index, task in enumerate(tasks):
         scenario_cfg = manifest["scenarios"][task.scenario]
         model_keys = scenario_cfg.get("model_keys") or global_model_keys
@@ -905,6 +1292,9 @@ def main() -> int:
             server_log = runtime["output_root"] / "vllm_server_logs" / f"{model_slug}.log"
             server_log.parent.mkdir(parents=True, exist_ok=True)
 
+            model_override_extra_args = resolve_model_override_extra_args(manifest, model_name)
+            model_extra_args = merge_vllm_extra_args(vllm_opts.extra_args, model_override_extra_args)
+
             server_env = os.environ.copy()
             if vllm_opts.hf_token:
                 server_env["HF_TOKEN"] = vllm_opts.hf_token
@@ -914,7 +1304,12 @@ def main() -> int:
                 server_env["HUGGINGFACE_HUB_CACHE"] = cache_dir
                 server_env["HF_HUB_CACHE"] = cache_dir
 
-            serve_cmd = build_vllm_serve_command(hf_model_id, vllm_opts)
+            serve_cmd = build_vllm_serve_command(
+                hf_model_id,
+                vllm_opts,
+                vllm_launcher or [vllm_opts.binary],
+                model_extra_args,
+            )
             print("\n[VLLM LOAD]")
             print(f"  model    : {model_name}")
             print(f"  hf_model : {hf_model_id}")

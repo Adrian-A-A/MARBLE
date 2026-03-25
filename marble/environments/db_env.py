@@ -2,11 +2,12 @@ import os
 import re
 import subprocess
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import psycopg2
 import requests
+import shutil
 from psycopg2 import OperationalError
 
 from marble.environments.base_env import BaseEnvironment
@@ -80,22 +81,142 @@ class DBEnvironment(BaseEnvironment):
         print(self.get_rag_handler("WorkloadExpert", "cpu"))
         print(self.get_slow_query_handler())
 
+    def _docker_daemon_reachable(self, use_sudo: bool) -> bool:
+        """Return whether docker daemon is reachable for the current privilege mode."""
+        if not shutil.which("docker"):
+            return False
+
+        command = ["docker", "ps"]
+        if use_sudo:
+            command = ["sudo", "-n", *command]
+
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                timeout=5,
+                check=False,
+                text=True,
+            )
+            if result.returncode == 0:
+                return True
+
+            stderr_text = (result.stderr or "").lower()
+            # Explicit daemon/connectivity failures.
+            if (
+                "cannot connect to the docker daemon" in stderr_text
+                or "connection refused" in stderr_text
+                or "is the docker daemon running" in stderr_text
+            ):
+                return False
+
+            return False
+        except Exception:
+            return False
+
+    def _detect_container_runtime(self) -> Optional[str]:
+        """Detect available compose runtime only if daemon connectivity is confirmed."""
+        has_docker_compose = shutil.which("docker-compose") is not None
+        has_docker = shutil.which("docker") is not None
+
+        # Prefer docker-compose if available, otherwise docker compose.
+        if has_docker_compose and self._docker_daemon_reachable(use_sudo=True):
+            return "docker-compose"
+        if has_docker and self._docker_daemon_reachable(use_sudo=True):
+            return "docker-compose-integrated"
+        if has_docker_compose and self._docker_daemon_reachable(use_sudo=False):
+            return "docker-compose-noroot"
+        if has_docker and self._docker_daemon_reachable(use_sudo=False):
+            return "docker-compose-integrated-noroot"
+
+        return None
+    
+    def _build_compose_command(self, runtime: str, action: str) -> list:
+        """Build the appropriate compose command for the detected runtime."""
+        if runtime == "docker-compose-integrated":
+            return ["sudo", "docker", "compose", action]
+        elif runtime == "docker-compose":
+            return ["sudo", "docker-compose", action]
+        elif runtime == "docker-compose-integrated-noroot":
+            return ["docker", "compose", action]
+        elif runtime == "docker-compose-noroot":
+            return ["docker-compose", action]
+        elif runtime == "docker-integrated-noroot":
+            return ["docker", "compose", action]
+        else:
+            raise ValueError(f"Unknown runtime: {runtime}")
+
     def start_docker_containers(self):
-        print("Starting Docker containers...")
-        subprocess.run(
-            ["sudo", "docker", "compose", "down", "-v"],
-            cwd=os.path.join(self.current_dir, "db_env_docker"),
-            shell=False,
-            check=True,
-        )
-        subprocess.run(
-            ["sudo", "docker", "compose", "up", "-d", "--remove-orphans"],
-            cwd=os.path.join(self.current_dir, "db_env_docker"),
-            check=True,
-        )
+        """Start database containers using docker-compose or skip with warning."""
+        runtime = self._detect_container_runtime()
+        
+        if not runtime:
+            print(
+                "[WARNING] No container runtime found or Docker daemon is not running. "
+                "Container services (PostgreSQL, Prometheus, exporters) will not be available. "
+                "This scenario requires a running PostgreSQL database. "
+                "Database scenario cannot proceed without containers."
+            )
+            raise RuntimeError(
+                "Database scenario requires running PostgreSQL containers. "
+                "Neither Docker nor Docker Compose could connect to a daemon. "
+                "On UCloud, containers are not currently supported. "
+                "This scenario can only run on systems with Docker/Docker Compose support."
+            )
+        
+        db_env_dir = os.path.join(self.current_dir, "db_env_docker")
+        
+        try:
+            print(f"Starting containers with {runtime}...")
+            down_cmd = self._build_compose_command(runtime, "down") + ["-v"]
+            up_cmd = self._build_compose_command(runtime, "up") + ["-d", "--remove-orphans"]
+            
+            subprocess.run(
+                down_cmd,
+                cwd=db_env_dir,
+                shell=False,
+                check=False,
+                timeout=30,
+                capture_output=True,
+            )
+            
+            result = subprocess.run(
+                up_cmd,
+                cwd=db_env_dir,
+                shell=False,
+                check=False,
+                timeout=60,
+                capture_output=True,
+                text=True,
+            )
+            
+            if result.returncode != 0:
+                print(f"[ERROR] Container startup failed with exit code {result.returncode}")
+                if result.stdout:
+                    print(f"  stdout: {result.stdout[:200]}")
+                if result.stderr:
+                    print(f"  stderr: {result.stderr[:200]}")
+                raise RuntimeError(f"Failed to start containers: {result.stderr[:200] if result.stderr else 'unknown error'}")
+        
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"Container startup timed out after {e.timeout}s")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Container startup failed: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error starting containers: {e}")
 
     def initialize_database(self, config: Dict[str, Any]):
+        # Wait for database to be available (with timeout)
+        max_wait_time = 120  # 2 minutes
+        start_time = time.time()
         while not self.check_db_connection():
+            elapsed = time.time() - start_time
+            if elapsed > max_wait_time:
+                raise RuntimeError(
+                    f"Database connection failed after {max_wait_time} seconds. "
+                    "PostgreSQL containers may not have started. "
+                    "Ensure docker-compose is available and containers can start in your environment."
+                )
             time.sleep(1)
 
         init_sql = config.get("init_sql", None)
@@ -647,11 +768,26 @@ class DBEnvironment(BaseEnvironment):
             return False
 
     def terminate(self) -> None:
-        subprocess.run(
-            ["sudo", "docker", "compose", "down"],
-            cwd=os.path.join(self.current_dir, "db_env_docker"),
-            check=True,
-        )
+        """Terminate containers using the detected runtime."""
+        runtime = self._detect_container_runtime()
+        
+        if not runtime:
+            print("[INFO] No container runtime available for cleanup.")
+            return
+        
+        db_env_dir = os.path.join(self.current_dir, "db_env_docker")
+        
+        try:
+            cmd = self._build_compose_command(runtime, "down")
+            subprocess.run(
+                cmd,
+                cwd=db_env_dir,
+                check=False,
+                timeout=30,
+                capture_output=True,
+            )
+        except Exception as e:
+            print(f"[WARNING] Error during container cleanup: {e}")
 
 
 if __name__ == "__main__":

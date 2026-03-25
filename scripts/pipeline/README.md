@@ -100,6 +100,9 @@ Notes for managed mode:
 - The runner strips `openai/` when launching `vllm serve` so Hugging Face repo IDs load correctly.
 - Configure per-model parser/tool-calling flags in `vllm_model_overrides` inside `scripts/pipeline/vllm_pipeline.yaml`.
 - Per-model `extra_args` are merged after CLI `--vllm-extra-args` and applied automatically when each model is served.
+- Optional Nemotron parser plugin paths can be injected via env vars (only used when set):
+  - `MARBLE_VLLM_NEMOTRON_TOOL_PARSER_PLUGIN` (or fallback `MARBLE_VLLM_TOOL_PARSER_PLUGIN`, `VLLM_TOOL_PARSER_PLUGIN`)
+  - `MARBLE_VLLM_NEMOTRON_REASONING_PARSER_PLUGIN` (or fallback `MARBLE_VLLM_REASONING_PARSER_PLUGIN`, `VLLM_REASONING_PARSER_PLUGIN`)
 - After each model finishes, the runner terminates vLLM and performs best-effort VRAM cache cleanup.
 - With `--clear-hf-cache-after-model`, the runner also deletes that model's local Hugging Face cache directory to free disk before the next model.
 

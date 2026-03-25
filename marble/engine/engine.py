@@ -112,6 +112,11 @@ class Engine:
         Raises:
             ValueError: If the environment type is not supported.
         """
+        # Expose the run-level model config to environments so action handlers
+        # can resolve model defaults consistently.
+        env_config = dict(env_config)
+        env_config.setdefault("llm", self.config.llm)
+
         env_type = env_config.get("type")
 
         if env_type == "Web":
@@ -294,27 +299,30 @@ class Engine:
             if iteration_data["communications"]:
                 iteration_data_communications = iteration_data.get("communications")
                 assert isinstance(iteration_data_communications, list)
-                # communications_str = self._format_communications(iteration_data_communications)
-                # self.evaluator.evaluate_communication(self.task, communications_str)
-                self.evaluator.metrics["communication_score"].append(-1)
+                communications_str = self._format_communications(iteration_data_communications)
+                self.evaluator.evaluate_communication(self.task, communications_str)
             else:
                 self.logger.info("No communications to evaluate")
                 # Store -1 if communications are empty
                 self.evaluator.metrics["communication_score"].append(-1)
 
             # Evaluate planning
-            # agent_profiles = self._get_agent_profiles()
-            # iteration_data_task_assignments = iteration_data.get("task_assignments")
-            # assert isinstance(iteration_data_task_assignments, dict)
-            # agent_tasks_str = self._format_agent_tasks(iteration_data_task_assignments)
-            # iteration_data_task_results = iteration_data.get("task_results")
-            # assert isinstance(iteration_data_task_results, list)
-            # results_str = self._format_results(iteration_data_task_results)
-            # iteration_data_summary = iteration_data.get("summary")
-            # assert isinstance(iteration_data_summary, str)
-            # self.evaluator.evaluate_planning(iteration_data_summary, agent_profiles, agent_tasks_str, results_str)
-            # self.evaluator.evaluate_kpi(self.task, results_str)
-            self.evaluator.metrics["planning_score"].append(-1)
+            agent_profiles = self._get_agent_profiles()
+            iteration_data_task_assignments = iteration_data.get("task_assignments")
+            assert isinstance(iteration_data_task_assignments, dict)
+            agent_tasks_str = self._format_agent_tasks(iteration_data_task_assignments)
+            iteration_data_task_results = iteration_data.get("task_results")
+            assert isinstance(iteration_data_task_results, list)
+            results_str = self._format_results(iteration_data_task_results)
+            iteration_data_summary = iteration_data.get("summary")
+            assert isinstance(iteration_data_summary, str)
+            self.evaluator.evaluate_planning(
+                iteration_data_summary,
+                agent_profiles,
+                agent_tasks_str,
+                results_str,
+            )
+            self.evaluator.evaluate_kpi(self.task, results_str)
 
             end_on_iter_0 = False
             if not continue_simulation:
@@ -390,27 +398,30 @@ class Engine:
                 if iteration_data["communications"]:
                     iteration_data_communications = iteration_data.get("communications")
                     assert isinstance(iteration_data_communications, list)
-                    # communications_str = self._format_communications(iteration_data_communications)
-                    # self.evaluator.evaluate_communication(self.task, communications_str)
-                    self.evaluator.metrics["communication_score"].append(-1)
+                    communications_str = self._format_communications(iteration_data_communications)
+                    self.evaluator.evaluate_communication(self.task, communications_str)
                 else:
                     self.logger.info("No communications to evaluate")
                     # Store -1 if communications are empty
                     self.evaluator.metrics["communication_score"].append(-1)
 
                 # Evaluate planning
-                # agent_profiles = self._get_agent_profiles()
-                # iteration_data_task_assignments = iteration_data.get("task_assignments")
-                # assert isinstance(iteration_data_task_assignments, dict)
-                # agent_tasks_str = self._format_agent_tasks(iteration_data_task_assignments)
-                # iteration_data_task_results = iteration_data.get("task_results")
-                # assert isinstance(iteration_data_task_results, list)
-                # results_str = self._format_results(iteration_data_task_results)
-                # iteration_data_summary = iteration_data.get("summary")
-                # assert isinstance(iteration_data_summary, str)
-                # self.evaluator.evaluate_planning(iteration_data_summary, agent_profiles, agent_tasks_str, results_str)
-                # self.evaluator.evaluate_kpi(self.task, results_str)
-                self.evaluator.metrics["planning_score"].append(-1)
+                agent_profiles = self._get_agent_profiles()
+                iteration_data_task_assignments = iteration_data.get("task_assignments")
+                assert isinstance(iteration_data_task_assignments, dict)
+                agent_tasks_str = self._format_agent_tasks(iteration_data_task_assignments)
+                iteration_data_task_results = iteration_data.get("task_results")
+                assert isinstance(iteration_data_task_results, list)
+                results_str = self._format_results(iteration_data_task_results)
+                iteration_data_summary = iteration_data.get("summary")
+                assert isinstance(iteration_data_summary, str)
+                self.evaluator.evaluate_planning(
+                    iteration_data_summary,
+                    agent_profiles,
+                    agent_tasks_str,
+                    results_str,
+                )
+                self.evaluator.evaluate_kpi(self.task, results_str)
                 # Decide whether to continue or terminate
                 if isinstance(self.environment, MinecraftEnvironment):
                     try:
@@ -710,12 +721,17 @@ class Engine:
                 try:
                     current_agent = self.graph.get_agent(next_agent_id)
                 except Exception:
-                    self.logger.error(
+                    self.logger.debug(
                         f"Agent '{next_agent_id}' not found in the graph. keep the same agent."
                     )
                     current_agent = current_agent_
                 # TODO: Revisit strict handling when plan is None/invalid (e.g., fail-fast or degrade run status).
-                task = plan
+                if isinstance(plan, str) and plan.strip():
+                    task = plan
+                else:
+                    self.logger.debug(
+                        "Received empty planning task from planner; keeping current task for next chain step."
+                    )
                 chain_length += 1
                 self.planner.update_progress(result)
                 iteration_data["communications"] = communication
@@ -723,11 +739,21 @@ class Engine:
                 # Evaluate communication
                 if iteration_data["communications"]:
                     iteration_data_communications = iteration_data.get("communications")
-                    assert isinstance(iteration_data_communications, list)
-                    communications_str = self._format_communications(
-                        iteration_data_communications
-                    )
-                    self.evaluator.evaluate_communication(self.task, communications_str)
+                    if isinstance(iteration_data_communications, list):
+                        communications_str = self._format_communications(
+                            iteration_data_communications
+                        )
+                        self.evaluator.evaluate_communication(self.task, communications_str)
+                    elif isinstance(iteration_data_communications, str):
+                        # Some environments return pre-formatted communication strings.
+                        self.evaluator.evaluate_communication(
+                            self.task, iteration_data_communications
+                        )
+                    else:
+                        self.logger.debug(
+                            "Unexpected communications payload type; skipping communication scoring for this iteration."
+                        )
+                        self.evaluator.metrics["communication_score"].append(-1)
                 else:
                     # Store -1 if communications are empty
                     self.evaluator.metrics["communication_score"].append(-1)
@@ -782,7 +808,9 @@ class Engine:
                 self.evaluator.evaluate_task_research(
                     self.task, iteration_data["summary"]
                 )
-                # summary_data['task_evaluation'] = self.evaluator.metrics["task_evaluation"]
+                summary_data["task_evaluation"] = self.evaluator.metrics[
+                    "task_evaluation"
+                ]
                 self.logger.info("Engine chain-based coordination loop completed.")
             elif self.environment.name == "World Simulation Environment":
                 self.evaluator.evaluate_task_world(self.task, iteration_data["summary"])

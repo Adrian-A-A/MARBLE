@@ -125,8 +125,33 @@ class MinecraftEnvironment(BaseEnvironment):
         self.clients[name] = MinecraftClient(name=name, local_port=local_port)
         self.logger.info(f"Agent {name} registered.")
 
+    def _wait_for_agents_ready(self, timeout_sec: int = 120, poll_interval_sec: float = 2.0):
+        """Wait until each launched minecraft bot endpoint reports status=True."""
+        deadline = time.time() + timeout_sec
+        last_results: Dict[str, Any] = {}
+
+        while time.time() < deadline:
+            all_ready = True
+            for agent_name in self.agents:
+                result = MinecraftClient.get_status(agent_name)
+                last_results[agent_name] = result
+                if not (isinstance(result, dict) and bool(result.get("status"))):
+                    all_ready = False
+
+            if all_ready:
+                self.logger.info("All Minecraft agents are ready.")
+                return
+
+            time.sleep(poll_interval_sec)
+
+        raise RuntimeError(
+            "Minecraft agents did not become ready before timeout. "
+            f"Last readiness responses: {last_results}"
+        )
+
     def launch(self):
         MinecraftClient.launch(host=self.host, port=self.port)
+        self._wait_for_agents_ready(timeout_sec=120, poll_interval_sec=2.0)
         self.logger.info("Minecraft environment launched.")
         marble_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         judger_script = os.path.join(

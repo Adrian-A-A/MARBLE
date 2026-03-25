@@ -660,59 +660,127 @@ def toss_():
     return jsonify({"message": msg, "status": tag})
 
 
+@app.route("/post_status", methods=["POST"])
+@log_activity(bot)
+def status():
+    """status: lightweight health/readiness status for launch-time checks."""
+    try:
+        if getattr(bot, "entity", None) is None or getattr(bot.entity, "position", None) is None:
+            return jsonify(
+                {
+                    "status": False,
+                    "error": "bot_entity_unavailable",
+                    "message": "bot entity is not ready yet",
+                }
+            )
+
+        return jsonify(
+            {
+                "status": True,
+                "message": "ready",
+                "position": [
+                    floor(bot.entity.position.x),
+                    floor(bot.entity.position.y),
+                    floor(bot.entity.position.z),
+                ],
+            }
+        )
+    except Exception as e:
+        return jsonify({"status": False, "error": str(e), "message": "status query failed"})
+
+
 @app.route("/post_environment", methods=["POST"])
 @log_activity(bot)  # 获取环境信息
 def environment():
     """environment:  to get the environment info."""
-    msg = get_envs_info2str(bot, RENDER_DISTANCE=32, same_entity_num=3)
-    blocks = BlocksNearby(
-        bot, Vec3, mcData, RenderRange=32, max_same_block=3, visible_only=VISIBLE_ONLY
-    )
-    hint = readNearestSign(bot, Vec3, mcData, max_distance=5)
-    for block in blocks:
-        msg += f"{block['name']} at {block['position']}\n"
-    if hint:
-        msg += f"the sign nearby said: {hint}"
+    try:
+        if getattr(bot, "entity", None) is None or getattr(bot.entity, "position", None) is None:
+            return jsonify(
+                {
+                    "message": "environment unavailable: bot entity is not ready yet",
+                    "status": False,
+                    "error": "bot_entity_unavailable",
+                }
+            )
 
-    if os.path.exists(".cache/env.cache"):
-        with open(".cache/env.cache", "r") as f:
-            cache = json.load(f)
-        # 找到距离小于5的cache
-        for c in cache:
-            pos = c["center"]
-            if (pos[0] - bot.entity.position.x) ** 2 + (
-                pos[1] - bot.entity.position.y
-            ) ** 2 + (pos[2] - bot.entity.position.z) ** 2 < 25:
-                msg["sign"] += f"The subtask in this room: {c['task_description']}"
-                msg["sign"] += f"The env in the room: {c['state']}"
-    done = True
-    return jsonify({"message": msg, "status": done})
+        msg = get_envs_info2str(bot, RENDER_DISTANCE=16, same_entity_num=3)
+        blocks = BlocksNearby(
+            bot,
+            Vec3,
+            mcData,
+            RenderRange=16,
+            max_same_block=3,
+            visible_only=VISIBLE_ONLY,
+        )
+        hint = readNearestSign(bot, Vec3, mcData, max_distance=5)
+        for block in blocks:
+            msg += f"{block['name']} at {block['position']}\n"
+        if hint:
+            msg += f"the sign nearby said: {hint}"
+
+        if os.path.exists(".cache/env.cache"):
+            with open(".cache/env.cache", "r") as f:
+                cache = json.load(f)
+            for c in cache:
+                pos = c["center"]
+                if (pos[0] - bot.entity.position.x) ** 2 + (
+                    pos[1] - bot.entity.position.y
+                ) ** 2 + (pos[2] - bot.entity.position.z) ** 2 < 25:
+                    msg += f"The subtask in this room: {c['task_description']}\n"
+                    msg += f"The env in the room: {c['state']}\n"
+
+        return jsonify({"message": msg, "status": True})
+    except Exception as e:
+        return jsonify(
+            {
+                "message": f"environment query failed: {e}",
+                "status": False,
+                "error": str(e),
+            }
+        )
 
 
 @app.route("/post_environment_dict", methods=["POST"])
 @log_activity(bot)  # 获取环境信息
 def environment_info():
     """environment:  to get the environment info."""
-    msg = get_envs_info_dict(bot, RENDER_DISTANCE=32, same_entity_num=3)
-    blocks = BlocksNearby(
-        bot, Vec3, mcData, RenderRange=32, max_same_block=3, visible_only=VISIBLE_ONLY
-    )
-    hint = readNearestSign(bot, Vec3, mcData, max_distance=5)
-    msg["blocks"] = blocks
-    msg["sign"] = hint
-    if os.path.exists(".cache/env.cache"):
-        with open(".cache/env.cache", "r") as f:
-            cache = json.load(f)
-        # 找到距离小于5的cache
-        for c in cache:
-            pos = c["center"]
-            if (pos[0] - bot.entity.position.x) ** 2 + (
-                pos[1] - bot.entity.position.y
-            ) ** 2 + (pos[2] - bot.entity.position.z) ** 2 < 25:
-                msg["sign"] += f"The subtask in this room: {c['task_description']}"
-                msg["sign"] += f"The env in the room: {c['state']}"
-    done = True
-    return jsonify({"message": msg, "status": done})
+    try:
+        if getattr(bot, "entity", None) is None or getattr(bot.entity, "position", None) is None:
+            return jsonify(
+                {
+                    "message": {},
+                    "status": False,
+                    "error": "bot_entity_unavailable",
+                }
+            )
+
+        msg = get_envs_info_dict(bot, RENDER_DISTANCE=16, same_entity_num=3)
+        blocks = BlocksNearby(
+            bot,
+            Vec3,
+            mcData,
+            RenderRange=16,
+            max_same_block=3,
+            visible_only=VISIBLE_ONLY,
+        )
+        hint = readNearestSign(bot, Vec3, mcData, max_distance=5)
+        msg["blocks"] = blocks
+        msg["sign"] = hint
+        if os.path.exists(".cache/env.cache"):
+            with open(".cache/env.cache", "r") as f:
+                cache = json.load(f)
+            for c in cache:
+                pos = c["center"]
+                if (pos[0] - bot.entity.position.x) ** 2 + (
+                    pos[1] - bot.entity.position.y
+                ) ** 2 + (pos[2] - bot.entity.position.z) ** 2 < 25:
+                    msg["sign"] = (msg.get("sign") or "") + (
+                        f"The subtask in this room: {c['task_description']}"
+                        f"The env in the room: {c['state']}"
+                    )
+        return jsonify({"message": msg, "status": True})
+    except Exception as e:
+        return jsonify({"message": {}, "status": False, "error": str(e)})
 
 
 @app.route("/post_entity", methods=["POST"])

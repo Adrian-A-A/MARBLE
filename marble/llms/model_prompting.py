@@ -53,6 +53,10 @@ def model_prompting(
     else:
         base_url = None
     normalized_messages = _ensure_non_empty_user_message(messages)
+
+    use_tools = tools
+    use_tool_choice = tool_choice
+
     try:
         completion = litellm.completion(
             model=llm_model,
@@ -62,8 +66,8 @@ def model_prompting(
             top_p=top_p,
             temperature=temperature,
             stream=stream,
-            tools=tools,
-            tool_choice=tool_choice,
+            tools=use_tools,
+            tool_choice=use_tool_choice,
             base_url=base_url,
         )
     except Exception as exc:
@@ -76,8 +80,12 @@ def model_prompting(
             or "tool-choice" in exc_text
             or "tool-call-parser" in exc_text
             or "enable-auto-tool-choice" in exc_text
+            or "bad request" in exc_text
+            or "400" in exc_text
+            or "unsupported parameter" in exc_text
+            or "invalid tools" in exc_text
         )
-        if tools and tool_calling_unsupported:
+        if use_tools and tool_calling_unsupported:
             print(
                 "[WARN] model_prompting: tool-calling request rejected by backend; "
                 "retrying without tools."
